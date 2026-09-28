@@ -1,0 +1,15 @@
+{
+  "name": "enyi-claude-skills",
+  "description": "Eason Ye's personal Claude Code skills.",
+  "owner": {
+    "name": "Eason Ye",
+    "email": "easonye@twilio.com"
+  },
+  "plugins": [
+    {
+      "name": "enyi-claude-skills",
+      "source": "./",
+      "description": "Ticket-to-PR workflow: tickets-to-manifest, implement-manifest, validate-manifest."
+    }
+  ]
+}

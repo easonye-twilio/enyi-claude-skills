@@ -1,0 +1,9 @@
+{
+  "name": "enyi-claude-skills",
+  "description": "Ticket-to-PR workflow: plan Jira tickets into a manifest, implement it across worktrees, and validate in a browser.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Eason Ye",
+    "email": "easonye@twilio.com"
+  }
+}
