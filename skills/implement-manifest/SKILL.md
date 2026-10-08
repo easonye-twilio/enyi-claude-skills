@@ -48,7 +48,7 @@ skill, silently — no confirmation needed:
 ## 3. Pick the execution backend
 
 ```bash
-orca status --json 2>/dev/null | jq -r '.result.runtime.state // "absent"'
+orca status --json | jq -r '.result.runtime.state // "absent"'
 ```
 
 - `ready` → **Orca backend** (step 4).
@@ -70,6 +70,16 @@ orca orchestration run-create --objective "<manifest slug>" --json \
 **Always `jq`-filter orca output.** Raw receipts carry capability lists, prompt
 metadata, and effect blocks you do not need; unfiltered they are the single largest
 avoidable cost in this skill.
+
+**Keep every `orca` command bare: `orca … | jq …` and nothing else.** Under the
+Claude Code sandbox, the CLI can't see the Orca app's process, so it reports
+`stale_bootstrap` and refuses to connect. Listing `orca:*` and `jq:*` in
+`sandbox.excludedCommands` fixes this, but only when the whole command matches
+those patterns. Adding a redirect (`2>/dev/null`), chaining with `&&`/`;`, or
+piping to any tool other than `jq` puts the command back in the sandbox. Expect
+`check --wait` to print keepalive heartbeats on stderr; they are harmless, so
+don't redirect them away. If `orca status` returns `stale_bootstrap` while the
+app is open, suspect this before deciding Orca is down.
 
 **Before the first dispatch, confirm the repo's own guardrails are live in a worker
 session.** A repo may enforce constraints with `PreToolUse` hooks from its project
@@ -227,6 +237,12 @@ Branch is already checked out and based on <pr-base>. When acceptance passes:
 
 You may use the in-process Agent tool for your own sub-tasks. You may NOT start
 Orca workers — nesting depth is capped and it will fail.
+
+Run every `orca` command (ask, send, worker_done) on its own, optionally piped to
+`jq`, with no redirects and no `&&`/`;` chaining. Anything else runs it inside the
+sandbox, where it reports "Orca is not running" even though Orca is up. If a send
+still fails, put the full report in the PR description and say so in your last
+message. The coordinator falls back to reading the PR.
 
 Report in <=3 sentences: outcome (succeeded/failed), the PR URL, the acceptance
 evidence, and any non-blocking review nits you left unfixed. Do NOT paste diffs,
