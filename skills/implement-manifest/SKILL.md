@@ -28,8 +28,33 @@ Take a path, or a slug resolved against `~/.claude/manifests/<repo-name>/`. If
 several exist and none was named, list them and ask.
 
 Parse buckets, dependencies, branch bases, per-bucket models, ticket keys,
-`Autonomous`, `Guidance`, and `Architecture`. Buckets already `done` are skipped —
-this is what makes a run resumable. If every bucket is `done`, say so and stop.
+`Autonomous`, `Guidance`, and `Architecture`. Buckets already `done` are skipped. If
+every bucket is `done`, say so and stop.
+
+**Older manifests** may lack `Profile:`, `Run:`, `Worktree:`, `Dispatch:`, or numbered
+checks. Infer the profile from the repo name, treat a missing `Run:` as "no reattach
+information", and treat free-text `Acceptance` as one unstructured check — say so in
+the report rather than pretending it was itemized. Older fields often carry prose
+after the value (`Status: done (2026-10-08, …)`, `Autonomous: no. <reason>`); the
+first word is the value. Ignore sections the skill doesn't own (status logs, rollout
+steps); never rewrite them.
+
+**Resume `dispatched` buckets before dispatching anything.** A `dispatched` bucket was
+in flight when a previous coordinator stopped. The worktree path and the Orca run may
+both be gone; the branch and PR are what survive. For each one:
+
+1. `gh pr list --head <branch> --json url,isDraft` — a PR exists → read it and decide
+   whether the work finished (check the PR description and commits against the
+   acceptance checks). If finished, record it as `done` and move on.
+2. `git worktree list` — reuse the worktree holding `<branch>` if there is one. Never
+   create a second worktree for a branch.
+3. Only if `Run:` is set and Orca is ready, `worker-list --run <runId>` for the
+   `Dispatch:` id. A live worker → rejoin the wait loop. An exited one → re-dispatch
+   to the existing worktree (step 9).
+
+**Write state as it happens, not at the end.** Re-read the manifest and edit only the
+field you are changing — never rewrite the whole file; `/validate-manifest` may be
+editing it from another session.
 
 **`Autonomous: no` buckets are never dispatched.** They carry an interactive gate
 no worker and no coordinator can clear — typically a Design Systems review for a
@@ -66,6 +91,8 @@ One Run for the whole manifest:
 orca orchestration run-create --objective "<manifest slug>" --json \
   | jq -r '.result.run.id'
 ```
+
+Write the id to the manifest's `Run:` header immediately.
 
 **Always `jq`-filter orca output.** Raw receipts carry capability lists, prompt
 metadata, and effect blocks you do not need; unfiltered they are the single largest
@@ -117,6 +144,10 @@ orca orchestration worker-start --run <runId> \
 Compare `launch.effective` against what you requested. If they differ, say so —
 never report a model from the requested arguments alone.
 
+Right after each dispatch, write the bucket's `Status: dispatched`, `Worktree:`, and
+`Dispatch:` to the manifest. This is what lets a later run resume instead of
+dispatching the bucket twice.
+
 Launch the entire ready wave before waiting. Then one rolling wait:
 
 ```bash
@@ -136,7 +167,8 @@ Process **every** message in the batch before acking:
 - `question` → `orca orchestration reply --id <msgId> --body "<answer>" --json`
 - `escalation` → decide, then reply or mark the bucket failed
 - `worker_done` → validate the payload's `taskId`/`dispatchId` against the bucket
-  you expect, record outcome and PR URL, transition its ticket(s) to In Review
+  you expect, verify the report (step 8), write `Status`, `PR`, and `Notes` (failure
+  reason, nits left unfixed) to the manifest, transition its ticket(s) to In Review
   (step 2), then `orca orchestration worker-release --dispatch <id> --json`
 
 Ack, then wait again. A timeout or empty batch is a **checkpoint, not a failure** —
@@ -168,10 +200,15 @@ Agent(subagent_type: "general-purpose", model: "sonnet",
       prompt: "<same task spec as step 6>")
 ```
 
-Launch an entire wave in one message so buckets run concurrently. Collect results
-(transitioning tickets to In Review once each PR URL is known, per step 2),
-update the manifest, proceed to the next wave. Everything else — task spec, PR
-handling, review — is unchanged.
+Before launching, write each bucket's `Status: dispatched` to the manifest; once an
+`Agent` returns, write the worktree path it reports to `Worktree:`. The branch name is
+what a later resume relies on, since `isolation: "worktree"` worktrees can be cleaned
+up automatically.
+
+Launch an entire wave in one message so buckets run concurrently. As each result
+arrives, verify it (step 8), write `Status`, `PR`, and `Notes`, and transition its
+tickets to In Review (step 2). Then proceed to the next wave. Everything else — task
+spec, PR handling, review — is unchanged.
 
 ## 6. The task spec
 
@@ -184,7 +221,18 @@ Target:      <from manifest>
 Change:      <from manifest>
 Constraints: <from manifest>
 Ownership:   This worktree only. Do not edit files outside the listed targets.
-Acceptance:  <from manifest>
+Acceptance:  <numbered checks from manifest>
+
+Each acceptance check is a command and the result that counts as passing. Run every
+one and record, per check ID, pass or fail with the evidence: exit code, test count,
+the named test that passed. A check you could not run is a fail, not a skip.
+
+<IF Mutation-check: yes>
+For each new test that covers the change: break the code it covers, run the test
+and confirm it FAILS, then restore the code, confirm the test passes again, and
+confirm `git diff` shows no leftover mutation. A test that never fails proves
+nothing. Report the mutation evidence under the check it supports.
+</IF>
 
 <IF the bucket has Guidance:>
 This repo owns how this work is built. Follow <Guidance> and do not improvise
@@ -244,16 +292,20 @@ sandbox, where it reports "Orca is not running" even though Orca is up. If a sen
 still fails, put the full report in the PR description and say so in your last
 message. The coordinator falls back to reading the PR.
 
-Report in <=3 sentences: outcome (succeeded/failed), the PR URL, the acceptance
-evidence, and any non-blocking review nits you left unfixed. Do NOT paste diffs,
-logs, review transcripts, or file contents.
-If you could not self-fix a blocking finding, say so explicitly rather than
-reporting success — that is what authorizes a coordinator re-dispatch (step 9).
+Report in exactly this shape, one line each, and nothing else:
+  STATUS: succeeded | failed — <one-clause reason if failed>
+  PR: <url>
+  CHECKS: A1 pass (<evidence>); A2 pass (<evidence>); ...
+  NITS: <non-blocking review nits left unfixed, or "none">
+Do NOT paste diffs, logs, review transcripts, or file contents. Anything longer
+belongs in the PR description.
+If you could not self-fix a blocking finding, report STATUS: failed and say so —
+that is what authorizes a coordinator re-dispatch (step 9).
 If blocked on a decision only the coordinator can make, ask rather than guessing.
 ```
 
-The last two lines are the token-efficiency mechanism. Worker tool output never
-reaches the coordinator; only this summary does. Keep it that way.
+The report format is the token-efficiency mechanism. Worker tool output never
+reaches the coordinator; only these four lines do. Keep it that way.
 
 ## 7. Validation
 
@@ -263,35 +315,27 @@ authenticated session runs here, serially, exactly once.
 
 ### Tier 1 — in the worker, parallel
 
-Headless: no ports, no auth, no browser. This is the bucket's `Acceptance`:
-
-- typecheck
-- lint (the design-system rules live here)
-- unit tests for affected projects
-- `/design-analysis` where the repo provides it — programmatic PASS/FAIL, not visual
-- the added-suppression grep from step 6
-
-Disable shared build daemons in workers; N worktrees contending on one daemon
-produces flaky, confusing failures. In `one-console`, prefix with
-`NX_DAEMON=false NX_TUI=false`.
+Headless: no ports, no auth, no browser, no deploy. This is the bucket's numbered
+`Acceptance`, written at planning time from the profile's hermetic checks
+(`../../profiles/<name>.md` relative to this skill's base directory). Read the
+profile for repo-specific worker notes — e.g. disabling a shared build daemon —
+and fold them into the task spec's `Constraints`.
 
 **E2E is not run locally.** CI runs it per PR. Running it again here is slow,
 needs the app and auth, and tells you nothing the pipeline will not.
 
 ### Tier 2 — not this skill
 
-Browser and Storybook validation are **`/validate-manifest`**, a separate session.
-They need one dev server, one login, and one browser, and they get re-run after
-review fixes and rebases — none of which fits inside an implementation run whose
-context is already spent on dispatch and review.
+Everything needing a shared resource — a browser, a dev server, a login, a deploy,
+live API calls, real traffic — is the bucket's `Validation`, run by
+**`/validate-manifest`** in a separate session. Those checks need one resource at a
+time and get re-run after review fixes and rebases, which does not fit inside an
+implementation run whose context is already spent on dispatch and review.
 
-Do not start a dev server, log in, or drive a browser from this skill. Finish
-implementation, then tell the user validation is the next step and hand them the
-manifest path.
+Do not start a dev server, log in, deploy, or drive a browser from this skill.
 
-Mark every UI bucket `Validated: pending` in the manifest so the next session knows
-what it owes. A bucket whose changes are not user-visible can be marked
-`Validated: n/a` with a one-clause reason.
+Every bucket with `Validation` checks stays `Validated: pending`; a bucket without
+any is `Validated: n/a`.
 
 ## 8. Review
 
@@ -300,6 +344,22 @@ Deep review already happened inside the worker's own worktree, as part of step 6
 reporting. Do not re-run `/deepreview-branch` yourself here; that would pull the
 full review transcript back into the coordinator's context, which is exactly what
 running it in-worktree was for.
+
+**Verify the report rather than redoing the work.** Read the `CHECKS:` line against
+the bucket's acceptance list: every check ID must appear with `pass` and concrete
+evidence. A missing ID, a `fail`, or evidence that is only an assertion ("tests
+pass") means the bucket is not done — re-dispatch (step 9). Do not re-run the checks
+yourself; that is the work the evidence exists to save.
+
+A few claims are cheap to check and costly to get wrong, so check them directly:
+
+```bash
+gh pr view <url> --json isDraft,baseRefName --jq '{isDraft, baseRefName}'
+```
+
+The PR must still be a draft and target the manifest's `PR base`. A worker that
+marked its PR ready or targeted `main` instead of its parent broke the spec — fix the
+PR state and record it in `Notes`.
 
 Independently re-check each PR for suppressions the worker may have added and not
 reported — do not take its word for it:
@@ -353,7 +413,10 @@ orca orchestration worker-list --run <runId> --terminal-state reclaimable --json
   | jq -r '.result.workers[].dispatchId'
 ```
 
-Write final `Status` and `PR` back into the manifest so a later run resumes cleanly.
+Every bucket's `Status`, `PR`, and `Notes` should already be written (steps 4–5).
+Confirm none is still `dispatched` without a reason, then overwrite the manifest's
+`## Handoff` section: one or two lines of state and the exact next step. Overwrite,
+don't append — history lives in the bucket fields and PRs, not in a growing log.
 
 Final report — one table, no narration:
 
@@ -365,5 +428,5 @@ buckets, and every `Autonomous: no` bucket still waiting on them. Leave worktree
 in place unless the user asks to clean them up.
 
 Close by pointing at **`/validate-manifest <slug>`** for the buckets left
-`Validated: pending`, and say plainly that nothing was visually verified in this
-session.
+`Validated: pending`, and say plainly that nothing beyond hermetic checks was
+verified in this session.
