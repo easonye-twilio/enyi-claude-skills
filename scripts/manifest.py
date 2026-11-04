@@ -24,10 +24,10 @@ FIELD_RE = re.compile(r"^- ([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
-MUTABLE = ("Status", "Validated", "PR", "Notes", "Worktree", "Dispatch", "Run")
+MUTABLE = ("Status", "Validated", "Evidence", "PR", "Notes", "Worktree", "Dispatch", "Run")
 ALLOWED = {
     "Status": {"pending", "dispatched", "done", "failed", "unknown"},
-    "Validated": {"pending", "pass", "fail", "n/a"},
+    "Validated": {"pending", "pass", "fail", "waiting", "unverified", "n/a"},
 }
 STATUS_COLUMNS = ("Status", "Validated", "PR", "Worktree", "Dispatch")
 
