@@ -106,7 +106,9 @@ passed.
 ## 5. Record verdicts
 
 Re-read the manifest, then edit only these lines of each bucket — never rewrite the
-file, since another session may have changed it:
+file, since another session may have changed it. Use
+`../../scripts/manifest.py set <manifest> <bucket> <field> <value>` (relative to this
+skill's base directory) for each one; it edits a single field and leaves the rest alone:
 
 ```
 - Validated: pass | fail | waiting | unverified
