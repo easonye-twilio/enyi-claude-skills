@@ -7,6 +7,13 @@ Claude Code plugin with a ticket-to-PR workflow:
 - `validate-manifest` — verify implemented work against real resources (browser, local stack, deploy, logs), per repo profile
 - `deepreview-branch` — deep review of a branch vs a base with three parallel reviewers, chat only; `--worktree <path>` reviews the branch checked out in another worktree
 
+Also included:
+
+- `standup` — daily standup digest from Jira, GitHub, Slack, git and calendar, written to the Obsidian daily note
+- `screenshot-changes` — capture UI screenshots that demonstrate the current branch's changes
+- `tac-context` — load Twilio Agent Connect architecture context before TAC work
+- `tac-sync` — refresh the local TAC doc snapshots and repos (data lives in `~/.claude/references/tac/`, not in this repo)
+
 Validation profiles live in `profiles/<name>.md`, one per repo family. A profile lists
 the repos it covers, their hermetic checks, validation kinds, preflight, gotchas, evidence,
 and teardown. Add one when starting work in a repo no profile covers.
