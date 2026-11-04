@@ -23,18 +23,21 @@ head=${3:-HEAD}
 
 [[ -f $profile ]] || { echo "profile not found: $profile" >&2; exit 2; }
 
-# Backtick-quoted tokens on the first `<key>:` line inside the Suppressions section.
+# Backtick-quoted tokens of the `<key>:` entry inside the Suppressions section. An entry
+# runs until a blank line or the next `Key:` line, so a long list may wrap.
 tokens() {
   awk -v key="$1" '
-    /^## /          { in_section = ($0 == "## Suppressions"); next }
-    in_section && index($0, key ":") == 1 {
-      line = substr($0, length(key) + 2)
-      while (match(line, /`[^`]+`/)) {
-        print substr(line, RSTART + 1, RLENGTH - 2)
-        line = substr(line, RSTART + RLENGTH)
+    function emit(text) {
+      while (match(text, /`[^`]+`/)) {
+        print substr(text, RSTART + 1, RLENGTH - 2)
+        text = substr(text, RSTART + RLENGTH)
       }
-      exit
-    }' "$profile"
+    }
+    /^## /                  { in_section = ($0 == "## Suppressions"); collecting = 0; next }
+    !in_section             { next }
+    index($0, key ":") == 1 { collecting = 1; emit(substr($0, length(key) + 2)); next }
+    collecting && (/^[[:space:]]*$/ || /^[A-Za-z][A-Za-z ]*:/) { collecting = 0; next }
+    collecting              { emit($0) }' "$profile"
 }
 
 globs=()
@@ -47,19 +50,36 @@ if [[ ${#globs[@]} -eq 0 || ${#patterns[@]} -eq 0 ]]; then
   exit 2
 fi
 
-merge_base=$(git merge-base "$base" "$head") || { echo "no merge-base for $base and $head" >&2; exit 2; }
+top=$(git rev-parse --show-toplevel) || { echo "not inside a git repository" >&2; exit 2; }
+merge_base=$(git -C "$top" merge-base "$base" "$head") || { echo "no merge-base for $base and $head" >&2; exit 2; }
 
 joined=$(IFS='|'; echo "${patterns[*]}")
 
 hits=$(
-  git diff --no-color --unified=0 "$merge_base..$head" -- "${globs[@]}" |
+  git -C "$top" -c core.quotepath=off diff --no-color --no-ext-diff --no-textconv --no-renames \
+      --unified=0 --src-prefix=a/ --dst-prefix=b/ "$merge_base..$head" -- "${globs[@]}" |
     SUPPRESSION_RE=$joined awk '
-      /^\+\+\+ /   { file = ($2 == "/dev/null") ? "" : substr($2, 3); next }
-      /^@@ /       { split($3, range, ","); line = substr(range[1], 2) + 0; next }
-      /^\+/        {
-        if (file != "" && substr($0, 2) ~ ENVIRON["SUPPRESSION_RE"])
-          printf "%s:%d: %s\n", file, line, substr($0, 2)
-        line++
+      # Inside a hunk, trust the header counts: a content line such as "++ x" must not
+      # be mistaken for a "+++ file" header.
+      old_left > 0 || new_left > 0 {
+        kind = substr($0, 1, 1)
+        if (kind == "+") {
+          if (file != "" && substr($0, 2) ~ ENVIRON["SUPPRESSION_RE"])
+            printf "%s:%d: %s\n", file, line, substr($0, 2)
+          line++; new_left--
+        } else if (kind == "-") old_left--
+        else if (kind == " ") { line++; new_left--; old_left-- }
+        next
+      }
+      /^\+\+\+ / {
+        file = substr($0, 5); sub(/\t.*$/, "", file)
+        file = (file == "/dev/null") ? "" : substr(file, 3)
+        next
+      }
+      /^@@ / {
+        old_left = ($2 ~ /,/) ? substr($2, index($2, ",") + 1) + 0 : 1
+        new_left = ($3 ~ /,/) ? substr($3, index($3, ",") + 1) + 0 : 1
+        line = substr($3, 2) + 0
       }'
 )
 

@@ -13,6 +13,8 @@ Use the bucket name `manifest` to read or write a header field such as `Run`.
 Older manifests carry prose after a field's value ("done (2026-10-08, ...)"); the
 first word is the value.
 """
+import contextlib
+import fcntl
 import os
 import re
 import sys
@@ -22,7 +24,7 @@ BUCKET_RE = re.compile(r"^## Bucket (\S+)")
 HEADING_RE = re.compile(r"^## ")
 FIELD_RE = re.compile(r"^- ([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
-FENCE_RE = re.compile(r"^\s*(```|~~~)")
+FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 MUTABLE = ("Status", "Validated", "Evidence", "PR", "Notes", "Worktree", "Dispatch", "Run")
 ALLOWED = {
@@ -50,19 +52,38 @@ def strip_eol(line):
 
 
 def first_word(value):
-    cleaned = value.strip().strip("`")
-    return cleaned.split()[0].rstrip(",;.") if cleaned else ""
+    words = value.split()
+    return words[0].strip("`").rstrip(",;.") if words else ""
+
+
+def fence_kinds(lines):
+    """Classify each line: '.' plain, 'o' fence open, 'i' inside a fence, 'c' fence close.
+
+    A fence closes only on the same character, at least as long as the opener.
+    """
+    kinds = []
+    fence = None
+    for line in lines:
+        text = strip_eol(line)
+        if fence is None:
+            match = FENCE_OPEN_RE.match(text)
+            if match:
+                fence = (match.group(1)[0], len(match.group(1)))
+                kinds.append("o")
+            else:
+                kinds.append(".")
+        elif re.match(rf" {{0,3}}{re.escape(fence[0])}{{{fence[1]},}}\s*$", text):
+            fence = None
+            kinds.append("c")
+        else:
+            kinds.append("i")
+    return kinds
 
 
 def sections(lines):
     """Return (header_range, {bucket_id: (start, end)}) using half-open line ranges."""
-    headings = []
-    fenced = False
-    for index, line in enumerate(lines):
-        if FENCE_RE.match(line):
-            fenced = not fenced
-        elif not fenced and HEADING_RE.match(line):
-            headings.append(index)
+    kinds = fence_kinds(lines)
+    headings = [i for i, line in enumerate(lines) if kinds[i] == "." and HEADING_RE.match(line)]
     header_end = headings[0] if headings else len(lines)
     buckets = {}
     for position, start in enumerate(headings):
@@ -80,14 +101,13 @@ def sections(lines):
 
 def find_field(lines, start, end, name, pattern):
     """Locate a field's line range [first, last) inside [start, end)."""
-    fenced = False
+    kinds = fence_kinds(lines)
     first = None
     for index in range(start, end):
         line = strip_eol(lines[index])
-        if FENCE_RE.match(line):
-            fenced = not fenced
-            continue
-        if fenced:
+        if kinds[index] != ".":
+            if kinds[index] == "o" and first is not None and not line.startswith((" ", "\t")):
+                return first, index
             continue
         match = pattern.match(line)
         if first is None:
@@ -104,6 +124,19 @@ def trim_trailing_blanks(lines, first, last):
     while last > first + 1 and not lines[last - 1].strip():
         last -= 1
     return last
+
+
+def insertion_point(lines, start, end, pattern):
+    """Line index after the last top-level field of [start, end), or after the heading."""
+    kinds = fence_kinds(lines)
+    last_field = None
+    for index in range(start, end):
+        if kinds[index] == "." and pattern.match(strip_eol(lines[index])):
+            last_field = index
+    if last_field is None:
+        return trim_trailing_blanks(lines, start, end)
+    _, block_end = find_field(lines, start, end, pattern.match(strip_eol(lines[last_field])).group(1), pattern)
+    return trim_trailing_blanks(lines, last_field, block_end)
 
 
 def field_value(lines, start, end, name, pattern):
@@ -134,6 +167,17 @@ def cmd_status(path):
         print(f"{bucket_id}  " + "  ".join(cells or ["(no mutable fields)"]))
 
 
+@contextlib.contextmanager
+def locked(path):
+    """Serialize read-modify-write cycles across processes via a lock on the directory."""
+    fd = os.open(os.path.dirname(path), os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def cmd_set(path, bucket, name, value):
     canonical = next((f for f in MUTABLE if f.lower() == name.lower()), None)
     if canonical is None:
@@ -144,6 +188,13 @@ def cmd_set(path, bucket, name, value):
     if allowed and first_word(value).lower() not in allowed:
         die(f"{canonical} must start with one of: {', '.join(sorted(allowed))}", 2)
 
+    path = os.path.realpath(path)
+    with locked(path):
+        apply_set(path, bucket, canonical, value)
+    print(f"{bucket} {canonical}: {value.strip()}")
+
+
+def apply_set(path, bucket, canonical, value):
     lines = read_lines(path)
     (hs, he), buckets = sections(lines)
     if bucket.lower() == "manifest":
@@ -162,11 +213,12 @@ def cmd_set(path, bucket, name, value):
         last = trim_trailing_blanks(lines, first, last)
         lines[first:last] = [new_line]
     else:
-        insert_at = trim_trailing_blanks(lines, start, end)
+        insert_at = insertion_point(lines, start, end, pattern)
+        if insert_at > 0 and not lines[insert_at - 1].endswith("\n"):
+            lines[insert_at - 1] += eol
         lines.insert(insert_at, new_line)
 
-    directory = os.path.dirname(os.path.abspath(path))
-    fd, temp = tempfile.mkstemp(dir=directory, prefix=".manifest-")
+    fd, temp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".manifest-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.writelines(lines)
@@ -175,7 +227,6 @@ def cmd_set(path, bucket, name, value):
     except BaseException:
         os.unlink(temp)
         raise
-    print(f"{bucket} {canonical}: {value.strip()}")
 
 
 def main(argv):
