@@ -11,7 +11,7 @@ Review all changes introduced by the current branch, or the branch in a given wo
 
 Arguments: `[<base-branch>] [--worktree <path>]`. Flags and the positional may come in any order.
 
-- **Base branch**: optional positional argument (e.g. `/deepreview-branch develop` or `/deepreview-branch origin/my-feature`). Defaults to `main`. Store it as BASE_BRANCH.
+- **Base branch**: optional positional argument (e.g. `/deepreview-branch develop` or `/deepreview-branch origin/my-feature`). Store it as BASE_BRANCH. If omitted, see the default below.
 - **`--worktree <path>`** (or `--worktree=<path>`): optional. Review the branch checked out in that git worktree instead of the current directory. The next token is the path; a missing value is an error, so stop and tell the user. Store it as WORKTREE.
 
 Always single-quote WORKTREE and BASE_BRANCH when placing them in shell commands. Reject a value containing a quote or newline, and a BASE_BRANCH starting with `-`.
@@ -23,6 +23,16 @@ If `--worktree` is given:
 - Set WORKTREE_INSTRUCTIONS to: `All files under review live in <WORKTREE>. Read them by absolute path under that directory, and run any git command as git -C '<WORKTREE>'. The current directory holds a different branch: never read it.`
 
 Without `--worktree`, run git in the current directory and leave WORKTREE_INSTRUCTIONS empty.
+
+If no base branch was given, default it without touching the network (local `main` can lag behind in a worktree; never fetch):
+
+```bash
+git rev-parse --verify --quiet origin/main
+git rev-parse --verify --quiet main
+```
+
+- If `origin/main` exists, set BASE_BRANCH to `origin/main`. If `main` also exists and points to a different commit, set BASE_NOTE to `Local main differs from origin/main; reviewing against origin/main as of its last fetch.`
+- Otherwise set BASE_BRANCH to `main`.
 
 ## Step 2: Get the diff
 
@@ -196,6 +206,7 @@ Format the output:
 ```
 Deep Code Review — <BRANCH_NAME> (<WORKTREE if set>) vs <BASE_BRANCH>
 <N commits reviewed>
+<BASE_NOTE if set>
 
 🔴 CRITICAL - Must fix before shipping
   - {findings}
