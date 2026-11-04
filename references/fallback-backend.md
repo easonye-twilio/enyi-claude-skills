@@ -42,10 +42,10 @@ ready bucket:
                   calls), give file tools absolute paths inside it, and never touch any
                   other checkout. Push with `git push -u origin <branch>`, open the PR
                   with `gh pr create --head <branch> ...`, and run the suppression check
-                  with the branch argument. When you run /deepreview-branch or start a
-                  sub-agent, say in the instruction that it must review
-                  `git -C <absolute path> diff origin/<pr-base>...<branch>` and run all
-                  git commands against that path; they do not inherit your `cd`.\n\n
+                  with the branch argument. Run the review as
+                  `/enyi-claude-skills:deepreview-branch origin/<pr-base> --worktree
+                  <absolute path>`: it does not inherit your `cd`. Tell any other
+                  sub-agent to run git as `git -C <absolute path>` for the same reason.\n\n
                   <same task spec as step 6>")
    ```
 
@@ -57,6 +57,4 @@ spec, PR handling, review — is unchanged.
 **Limits.** A bucket's `Agent` does not survive a coordinator restart and writes no
 `Dispatch:`, so a resumed run (step 1) treats it as not running and finds its work through
 the branch, its worktree, and the PR. A finished `Agent` cannot be messaged; re-dispatch
-(step 9) starts a new one in the same worktree. The review step relies on the worker
-passing the worktree path along (above); check that the PR's review notes name the right
-branch before trusting them.
+(step 9) starts a new one in the same worktree.
