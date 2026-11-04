@@ -56,7 +56,7 @@ orca orchestration worker-start --run <runId> \
   --spec "<task spec, step 6>" \
   --task-title "<bucket title>" \
   --worktree "<worktreeId>" \
-  --agent claude --model <bucket model> --effort <bucket effort> --json \
+  --agent claude --keep-open --model <bucket model> --effort <bucket effort> --json \
   | jq -c '{task:.result.taskId, dispatch:.result.dispatchId, state:.result.state,
             agent:.result.launch.effective.agent, model:.result.launch.effective.model}'
 ```
@@ -89,12 +89,12 @@ Process **every** message in the batch before acking:
 - `worker_done` → validate the payload's `taskId`/`dispatchId` against the bucket you
   expect, then verify the report (step 8). Everything after that depends on the verdict:
   - **Accepted** → write `Status: done`, `PR`, and `Notes` (nits left unfixed) to the
-    manifest, transition its ticket(s) to In Review (step 2), and only then
+    manifest (and `Validated: pending` if this was a validation fix), transition its ticket(s) to In Review (step 2), and only then
     `orca orchestration worker-release --dispatch <id> --json`.
   - **Rejected, attempts left** → re-dispatch (step 9) into the same terminal. Do not
     move the ticket and do not release: release removes the terminal step 9 reuses.
-  - **Rejected, cap reached** → write `Status: failed` with the reason in `Notes`, then
-    release.
+  - **Rejected, cap reached** → write `Status: failed` with the reason in `Notes` (and
+    `Validated: unverified` if it was a validation fix), then release.
 
 Ack, then wait again. A timeout or empty batch is a **checkpoint, not a failure** —
 keep waiting. After three consecutive empty waits:

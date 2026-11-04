@@ -58,8 +58,9 @@ token usage, and states deliberately and report mismatches as findings.
 ## Preflight
 
 - `lsof -i :5173` / `lsof -i :9001` — a server already listening may have been started from
-  another checkout or commit. Reuse it only after confirming its working directory is the
-  bucket's worktree (`lsof -a -p <pid> -d cwd`); otherwise stop it if you started it, or ask.
+  another checkout or commit. Reuse it only after confirming its working directory is
+  inside the bucket's worktree (`lsof -a -p <pid> -d cwd`; Nx often runs from `apps/...`);
+  otherwise stop it if you started it, or ask.
 - `test -f libs/common-e2e/.env.dev` / `.env.stage` for the environment you will hit.
   Check presence only; never print contents.
 
@@ -68,14 +69,16 @@ token usage, and states deliberately and report mismatches as findings.
 - **One authenticated session and one tab at a time.** Concurrent logins as the same
   user invalidate each other and look like app bugs. Close every tab you opened for a
   bucket before moving to the next; close the last one before reporting.
-- **Screenshots: keep `orca` bare, decode separately.** `orca screenshot … | jq …` is
-  fine; adding `| base64 -d > file` puts the command back in the sandbox, where it fails
-  with `stale_bootstrap`. Run `orca screenshot --json | jq -c '.result'` on its own and
-  read the shape it returns. If it carries a file `path`, `cp` that file into the
-  evidence directory in a second command. If it carries inline base64 in `result.data`
-  (older CLIs; there is no `--out` flag), write that text to a file with the Write tool
-  and run `base64 -d` on it in a separate command. Either way check the file exists and
-  is non-empty; do not assume it because the command exited 0.
+- **Screenshots: keep `orca` bare, and keep the payload out of context.** `orca screenshot
+  … | jq …` is fine; adding `| base64 -d > file` puts the command back in the sandbox,
+  where it fails with `stale_bootstrap`. First look at the shape without the payload:
+  `orca screenshot --json | jq -c '.result | del(.data)'`. If it carries a file `path`,
+  `cp` that file into the evidence directory in a second command. If the image only
+  comes back inline in `result.data` (older CLIs; there is no `--out` flag), saving it
+  means pushing megabytes of base64 through the Write tool and risks a truncated PNG:
+  do that only for the shots that matter, then `base64 -d` it in a separate command and
+  confirm with `file <png>` that it reports PNG image data (size alone does not catch a
+  corrupt file). Otherwise record what you saw in `Evidence` and say no image was saved.
 - No visual-regression tooling exists, so every browser `pass` is an agent's judgment,
   not a test. Say so in the report.
 

@@ -26,7 +26,7 @@ FIELD_RE = re.compile(r"^- ([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
-MUTABLE = ("Status", "Validated", "Validated-at", "Evidence", "PR", "Notes", "Worktree", "Dispatch", "Run")
+MUTABLE = ("Status", "Validated", "Validated-at", "Redispatches", "Evidence", "PR", "Notes", "Worktree", "Dispatch", "Run")
 ALLOWED = {
     "Status": {"pending", "dispatched", "done", "failed", "unknown"},
     "Validated": {"pending", "pass", "fail", "waiting", "unverified", "n/a"},

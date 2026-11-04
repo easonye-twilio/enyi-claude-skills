@@ -173,6 +173,13 @@ class SetTest(ManifestTest):
         self.assertIn("- Validated-at: def456\n", text)
         self.assertNotIn("abc123", text)
 
+    def test_redispatches_counter_is_its_own_field_and_survives_notes_writes(self):
+        self.set("B", "Redispatches", "1")
+        self.set("B", "Notes", "nits")
+        text = self.read()
+        self.assertIn("- Redispatches: 1\n", text)
+        self.assertIn("- Notes: nits\n", text)
+
     def test_inserts_into_last_bucket_without_trailing_newline(self):
         self.write("# M\n\n## Bucket A — x\n- Status: pending")
         code, _, _ = self.set("A", "PR", "https://example.com/1")

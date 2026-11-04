@@ -40,7 +40,9 @@ unimplemented, `dispatched`, `failed`, or waiting on the user (`Autonomous: no`)
 `Validated: pending` from planning but has nothing to validate; list those and say why
 they were skipped. Of the `done` buckets, select the ones with `Validated: pending`,
 `waiting`, or `unverified`, plus any `pass` whose branch moved since: compare the
-bucket's `Validated-at` SHA with `git rev-parse origin/<branch>` (after a fetch). A `pass`
+bucket's `Validated-at` SHA with `git rev-parse origin/<branch>` (after a
+`git fetch`, run with `dangerouslyDisableSandbox`; if the fetch fails, treat every `pass`
+as possibly moved and select it). A `pass`
 with no `Validated-at` is selected too, since nothing says what it covered. Skip `n/a`,
 and skip a current `pass` unless the user asks for a re-run. If nothing is selected, say
 so and stop.
@@ -76,8 +78,9 @@ this step exists to prevent.
 Check what is already running before starting a second instance, but reuse it only if
 it serves the code under test. A dev server or Storybook on a known port may belong to
 another checkout or commit, and validating against it gives a false pass. Find its
-working directory (`lsof -a -p <pid> -d cwd`) and compare it with the bucket's
-worktree; if it differs, or you cannot tell, stop it (only if you started it) or ask the
+working directory (`lsof -a -p <pid> -d cwd`) and resolve its real path: servers
+spawned by Nx or pnpm often sit in a subdirectory such as `apps/storybook`, so accept it
+when that path is inside the bucket's worktree. If it is elsewhere, or you cannot tell, stop it (only if you started it) or ask the
 user, rather than reusing it. Never parallelize this skill: concurrent logins invalidate each other, two deploys to
 one environment race, and a shared Twilio number can only point at one webhook. The
 resulting failures look like implementation bugs.
@@ -122,7 +125,7 @@ file, since another session may have changed it. Use
 
 ```
 - Validated: pass | fail | waiting | unverified
-- Validated-at: <full SHA of origin/<branch> that was checked out for the checks>
+- Validated-at: <full SHA of that bucket's own origin/<branch>; in a stack-tip pass, each bucket's own SHA, not the tip's>
 - Evidence: V1 pass — <what was observed, path>; V2 fail — <what broke>; V3 unverified — <what could not be reached and why>; ...
 ```
 
@@ -135,8 +138,9 @@ Then overwrite the manifest's `## Handoff` section: what was validated, what is
 waiting and on what, and the exact command to resume.
 
 For a `fail`, route the fix back to the bucket's branch rather than patching it here —
-this session's job is the verdict, not the repair. Also set the bucket's `Status` to
-`failed`: that is the re-entry signal. `/implement-manifest` re-dispatches a `failed`
+this session's job is the verdict, not the repair. Also set `Status: failed` on the bucket
+that owns the failing check (in a stack-tip pass, the lowest bucket whose change causes
+it, not the whole stack): that is the re-entry signal. `/implement-manifest` re-dispatches a `failed`
 bucket whose `Validated` is `fail` to its existing worktree, using `Evidence` as the
 change, and on success returns it to `Status: done`, `Validated: pending` — which this
 skill then selects again.

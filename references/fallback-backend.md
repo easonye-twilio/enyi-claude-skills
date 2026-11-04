@@ -10,17 +10,24 @@ ready bucket:
    branch name, so a stacked bucket would not sit on its parent, and a later resume could
    not find the branch.
 
+   Put worktrees inside the repo, in `.worktrees/`, so the sandbox lets workers write
+   there (it only allows writes under the working directory). Keep them out of `git status`
+   by adding `.worktrees/` to `.git/info/exclude`.
+
    ```bash
-   git fetch origin <pr-base>
-   git worktree add -b <branch> <worktree-path> origin/<pr-base>
+   git fetch origin <pr-base>        # needs dangerouslyDisableSandbox; stop if it fails
+   git worktree add --no-track -b <branch> .worktrees/<branch with "/" replaced by "-"> origin/<pr-base>
    ```
 
-   `<branch>` and `<pr-base>` come from the manifest (a stacked bucket's `<pr-base>` is
-   its parent's branch, so start it only after the parent has pushed). `<worktree-path>`
-   is an absolute path outside the repo, for example
-   `<repo-root>/../<repo-name>-worktrees/<branch with "/" replaced by "-">`. If the
-   sandbox denies the write outside the repo, re-run just that command with
-   `dangerouslyDisableSandbox`.
+   `--no-track` matters: without it the new branch's upstream is `origin/<pr-base>`, and a
+   bare `git push` or `git pull` would target the base (`main`, or the parent bucket's
+   branch). `<branch>` and `<pr-base>` come from the manifest; a stacked bucket's
+   `<pr-base>` is its parent's branch, so start it only after the parent has pushed.
+
+   If the branch already exists (a resumed run whose worktree was removed), never recreate
+   it from the base: use `git worktree add <path> <branch>` for a local branch, or
+   `git worktree add --no-track -b <branch> <path> origin/<branch>` for one that exists
+   only on the remote.
 2. **Claim the bucket** before launching: `Status: dispatched` and `Worktree: <absolute
    path>` (use `manifest.py set`, see step 1).
 3. **Dispatch with `Agent`, no `isolation`,** and set `model` explicitly per bucket. Start
@@ -29,10 +36,17 @@ ready bucket:
    ```
    Agent(subagent_type: "general-purpose", model: "sonnet",
          description: "<bucket title>",
-         prompt: "Your worktree is <absolute path>, on branch <branch>. Run every shell
-                  command as `cd <absolute path> && ...` (the working directory does not
-                  persist between calls) and give file tools absolute paths inside it.
-                  Never touch any other checkout.\n\n<same task spec as step 6>")
+         prompt: "Your worktree is <absolute path>, on branch <branch>. Your working
+                  directory is NOT that worktree. Run every shell command as
+                  `cd <absolute path> && ...` (the directory does not persist between
+                  calls), give file tools absolute paths inside it, and never touch any
+                  other checkout. Push with `git push -u origin <branch>`, open the PR
+                  with `gh pr create --head <branch> ...`, and run the suppression check
+                  with the branch argument. When you run /deepreview-branch or start a
+                  sub-agent, say in the instruction that it must review
+                  `git -C <absolute path> diff origin/<pr-base>...<branch>` and run all
+                  git commands against that path; they do not inherit your `cd`.\n\n
+                  <same task spec as step 6>")
    ```
 
 Launch an entire wave in one message so buckets run concurrently. As each result
@@ -40,7 +54,9 @@ arrives, verify it (step 8), write `Status`, `PR`, and `Notes`, and transition i
 tickets to In Review (step 2). Then proceed to the next wave. Everything else — task
 spec, PR handling, review — is unchanged.
 
-**Limits.** A bucket's `Agent` does not survive a coordinator restart and writes no `Run:`
-or `Dispatch:`, so a resumed run (step 1) treats it as not running and finds its work
-through the branch, its worktree, and the PR. A finished `Agent` cannot be messaged;
-re-dispatch (step 9) starts a new one in the same worktree.
+**Limits.** A bucket's `Agent` does not survive a coordinator restart and writes no
+`Dispatch:`, so a resumed run (step 1) treats it as not running and finds its work through
+the branch, its worktree, and the PR. A finished `Agent` cannot be messaged; re-dispatch
+(step 9) starts a new one in the same worktree. The review step relies on the worker
+passing the worktree path along (above); check that the PR's review notes name the right
+branch before trusting them.

@@ -7,13 +7,14 @@ CLAUDE.md first where one exists — it wins over this file.
 
 ## Hermetic checks (worker, parallel)
 
-**memora-domain** (Go) — there is no root `go.mod` and no root `fmtchk` target; each
-service under `services/<x>` is its own module. Run per-service commands from that
-directory:
-- `cd services/<x> && go vet ./...` and `golangci-lint run`
-- `make fmtchk` only in a service whose own `Makefile` defines it; otherwise `gofmt -l .`
-- `CN_INCLUDE_ONLY_MAKEFILE_PATHS="services/<x>" make test` from the repo root. Unscoped
-  `make test` runs every building block, so always scope it.
+**memora-domain** (Go) — there is no root `go.mod` and no root `fmtchk` target. Every
+building block is its own module: a service (`services/<svc>` or nested, such as
+`services/recall/<svc>`) or a library under `libs/`. For each changed file, find its
+nearest `go.mod` and run from that directory:
+- `go vet ./...` and `golangci-lint run`
+- `make fmtchk` only if that module's own `Makefile` defines it; otherwise `gofmt -l .`
+- `CN_INCLUDE_ONLY_MAKEFILE_PATHS="<module dir relative to the repo root>" make test`
+  from the repo root. Unscoped `make test` runs every building block, so always scope it.
 - `make terraform-fmt` when `.tf` files changed
 - Specs: `make lint` and `make breaking` in `specs/` when protos changed
 
@@ -41,7 +42,7 @@ than suppressing it.
 | Kind | memora-domain | maestro-domain | agent-connect-domain |
 |---|---|---|---|
 | local-stack | `make up` (compose + LocalStack) | `make local` | not yet available |
-| api | `scripts/api-tests/*.sh <local\|dev\|stage\|prod>` — `prod` only for read-only scripts (`get-*`, `list-*`) | `ijhttp -e <env> -v requests/http-client.env.json requests/<file>.http` — `prod` only for GET-only request files | not yet available |
+| api | `scripts/api-tests/*.sh <local\|dev\|stage\|prod>` — `prod` only for `get-*` and `list-*` | `ijhttp -e <env> -v requests/http-client.env.json requests/<file>.http` — never `prod` | not yet available |
 | component | Temporal `MemoraDomainTestSuite` via `services/common/test-worker` | `services/test-worker` | not yet available |
 | dev-deploy | `dev-deploy` PR label → Buildkite → Harness; track with the repo's `dev-deploy` skill | CI-only (`make git-create-and-push-dev-branch` force-pushes; never run locally) | none — no dev-only path; `main` deploys to every environment |
 | deploy-status | Harness MCP, `beacon deploys <svc> --env <env> --since 1d` | Harness MCP | Harness MCP; ECS service status |
@@ -49,10 +50,13 @@ than suppressing it.
 
 Prefer the Grafana MCP over WebFetch for dashboards and queries.
 
-**Never send a mutating request to `prod`.** memora's `create-*`, `patch-*`, `delete-*`
-and `import-profiles.sh` scripts write data, and maestro `.http` files contain POST/PUT
-requests. Run those against `local`, `dev`, or `stage` only. Check a script or request
-file's method before pointing it at `prod`, and make any prod check read-only.
+**Never send a mutating request to `prod`.** In memora, only `get-*` and `list-*` scripts
+may run against `prod`; `create-*`, `patch-*`, `delete-*`, `import-profiles.sh`,
+`recall.sh` (a POST) and the k6 scripts in `scripts/api-tests/load/` write data. Every
+maestro `requests/*.http` file contains POST (some also PUT or DELETE) and `ijhttp` runs
+the whole file, so none of them runs against `prod`; do not write an ad-hoc GET-only file
+for it either. Run mutating checks against `local`, `dev`, or `stage`, and make any prod
+check a read-only query.
 
 **Merging is never a validation step.** In agent-connect-domain the orchestrator deploys
 `main` to dev, stage, and prod, so a merge is a production release, not a check.
