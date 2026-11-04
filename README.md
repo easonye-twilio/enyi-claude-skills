@@ -5,6 +5,7 @@ Claude Code plugin with a ticket-to-PR workflow:
 - `tickets-to-manifest` — turn Jira tickets into a dependency-ordered implementation manifest
 - `implement-manifest` — execute a manifest across worktrees, one draft PR per bucket
 - `validate-manifest` — verify implemented work against real resources (browser, local stack, deploy, logs), per repo profile
+- `deepreview-branch` — deep review of a branch vs a base with three parallel reviewers, chat only; `--worktree <path>` reviews the branch checked out in another worktree
 
 Validation profiles live in `profiles/<name>.md`, one per repo family. A profile lists
 the repos it covers, their hermetic checks, validation kinds, preflight, gotchas, evidence,

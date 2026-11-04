@@ -58,7 +58,8 @@ No repo has a live integration or E2E test. Real-resource validation is mostly m
   rewires the Twilio number):
   - aws: `make deploy` (CDK) in `deploy/agentcore_aws_lambda`; outputs list webhook URLs
   - microsoft: `make deploy`, then `make configure-twilio` (the only repo that wires
-    Twilio automatically). Record the old webhook values first, as for `example`
+    Twilio automatically). The deploy targets live in
+    `deploy/agent_framework_hosted_agents`, not at the repo root. Record the old webhook values first, as for `example`
   - google: `make deploy-all` in `deploy/agent_platform/adk`
 - **agent-probe** (`auto` once deployed) — google only:
   `deploy/agent_platform/adk/agent/invoke_adk.py` queries the deployed agent directly,
@@ -100,8 +101,19 @@ timestamps, and the user's report for `manual` checks.
 
 Part of the outcome — a resource left deployed is a `fail`, even if every check passed.
 
-- aws: `make destroy`
-- microsoft: `make down`
+- Before deploying, record whether the stacks and environments already exist
+  (`aws cloudformation describe-stacks` for the `Tac*` stacks; `azd env list`). If they
+  do, they belong to someone else or an earlier run: ask before deploying or tearing down.
+- aws: `make destroy` in `deploy/agentcore_aws_lambda` (there is no root target). It runs
+  `cdk destroy ... --force` with no prompt, for fixed stack names.
+- microsoft: confirm `AZURE_ENV_NAME` is set in `.env` first (otherwise `azd` targets its
+  current default environment, possibly a different deployment). `make down` in
+  `deploy/agent_framework_hosted_agents` asks for
+  confirmation; with no input it prints "Aborted." and **exits 0 while every resource
+  stays up**. Have the user run it, or run it where they can answer the prompt, and
+  confirm afterwards that the resources are gone (`azd show`, or list the resource
+  group). Never pipe `yes` into it or add `--force --purge`: that destroys and purges
+  without asking. An exit code of 0 is not evidence of teardown here.
 - google: no documented teardown. During deploy, record the Cloud Run service name, the
   secret name, and the reasoning engine ID. At teardown, list those exact resources to
   the user and delete them only after they confirm; never delete anything not recorded
