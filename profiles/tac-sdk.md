@@ -26,6 +26,11 @@ google supports Python 3.10–3.11 only.
 `npm test`, `npm run build`. Examples `getting_started/examples/openai` and `chat` are
 also linted and type-checked in CI.
 
+**python-em, aws-twilio-agent-connect-python, twilio-agent-connect-aws-deploy,
+aws-twilio-agent-connect-deploy**: no check commands are recorded here. When writing
+`Acceptance` for these repos, derive it at planning time from the repo's CLAUDE.md and CI
+workflow (`.github/workflows/`), so each check is a concrete command.
+
 The repos' `test_integration.py` / `integration.test.ts` are **mocked**. They are
 hermetic checks, not evidence of live behavior.
 
@@ -44,11 +49,15 @@ linter or type-checker pass. If a rule cannot be satisfied, report it as a findi
 
 No repo has a live integration or E2E test. Real-resource validation is mostly manual.
 
-- **example** (`manual`) — run a `getting_started` example behind `ngrok http 8000`,
+- **example** (`manual`) — before touching any webhook, record the current Voice and
+  Messaging webhook URLs on the number and the Conversation Configuration webhooks (the
+  teardown restores them). Run a `getting_started` example behind `ngrok http 8000`,
   point the Twilio number and Conversation Configuration webhooks at it, then call or
   text the number. Proof: the agent responds, and the logs show the expected path.
 - **deploy** (`manual` unless the user says otherwise; creates billable resources and
-  rewires the Twilio number):
+  rewires the Twilio number). Before any deploy, for every cloud, record the current
+  webhook values (redact query strings and userinfo) in the bucket's `Notes`, so teardown
+  can restore them:
   - aws: `make deploy` (CDK) in `deploy/agentcore_aws_lambda`; outputs list webhook URLs
   - microsoft: `make deploy`, then `make configure-twilio` (the only repo that wires
     Twilio automatically). The deploy targets live in
@@ -71,7 +80,7 @@ Presence by name only; never print values.
 - Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY`,
   `TWILIO_API_SECRET`, `TWILIO_PHONE_NUMBER`, `TWILIO_CONVERSATION_CONFIGURATION_ID`
 - `command -v ngrok` for `example`
-- Cloud auth: `aws sts get-caller-identity` (aws), `az account show` (microsoft), `gcloud auth list` (google)
+- Cloud auth: `[ -n "$AWS_PROFILE" ]`, then `aws sts get-caller-identity` (aws; uses the ambient profile. If `AWS_PROFILE` is unset, ask the user which profile; never read the `.env` file), `az account show` (microsoft), `gcloud auth list` (google)
 
 ## Gotchas
 
@@ -107,7 +116,11 @@ Part of the outcome — a resource left deployed is a `fail`, even if every chec
   confirm afterwards that the resources are gone (`azd show`, or list the resource
   group). Never pipe `yes` into it or add `--force --purge`: that destroys and purges
   without asking. An exit code of 0 is not evidence of teardown here.
-- google: no documented teardown; delete the Cloud Run service, the secret, and the
-  reasoning engine by hand, and list them in the evidence
-- Restore the Twilio number and Conversation Configuration webhooks to what they were
-  before, and record both the old and new values.
+- google: no documented teardown. During deploy, record the Cloud Run service name, the
+  secret name, and the reasoning engine ID. At teardown, list those exact resources to
+  the user and delete them only after they confirm; never delete anything not recorded
+  from this run. If no confirmation is possible, leave them, list them in the evidence,
+  and mark the bucket `fail` with "teardown pending"
+- Restore the Twilio number and Conversation Configuration webhooks to the values
+  recorded before the first change, and record both the old and new values. If the old
+  values were not recorded, say so and ask the user; do not guess.

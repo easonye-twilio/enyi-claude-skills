@@ -48,8 +48,10 @@ checks are what `Acceptance` is written from, and its validation kinds are what
 `Validation` is written from. Record it in the manifest's `Profile:` header.
 
 No matching profile → say so, and offer to draft one with the user before bucketing.
-Without one, `Acceptance` falls back to the repo's CI commands and `Validation` to
-`unverified`.
+Without one, `Acceptance` falls back to the repo's CI commands, `Validation` is
+`none`, and `Validated` stays `pending`. `/validate-manifest` selects `pending`
+buckets, finds no profile, and records each as `unverified` with the reason — so the
+gap is reported downstream instead of silently skipped.
 
 ## 2. Explore in parallel (token-efficient)
 
@@ -143,14 +145,14 @@ Run: —
 - PR base: main
 - Model: sonnet / high
 - Autonomous: yes
-- Guidance: /implement-page <figma-url>     # or "none"
+- Guidance: /implement-page <figma-url>
 - Target: <exact files, dirs, or modules in scope>
 - Change: <the concrete result to produce>
 - Constraints: <invariants, do-not-touch boundaries, repo lint rules>
 - Acceptance:
   - A1: `<command>` → <expected result>  (covers MEMORY-123 AC1)
   - A2: `<command>` → <expected result>  (covers MEMORY-124 AC2)
-- Mutation-check: no          # yes for buckets whose new tests carry the risk
+- Mutation-check: no
 - Judgment: <items a reviewer decides, not a command — or "none">
 - Validation:
   - V1 (auto): <observation> → <expected result>  (covers MEMORY-123 AC3)
@@ -163,7 +165,7 @@ Run: —
 - Dispatch: —
 - PR: —
 - Notes: —
-- Validated: pending          # or n/a when no Validation checks exist
+- Validated: pending
 - Evidence: —
 
 ## Bucket B — <PR title>
@@ -179,6 +181,12 @@ Run: —
 - State: <one or two lines>
 - Next: <the exact command or step to resume>
 ```
+
+Field values are passed to workers verbatim, so never put `#` comments inside them.
+`Guidance` is `none` when no repo skill applies. `Mutation-check` is `yes` or `no`.
+`Validated` is `pending`, or `n/a` when a profile exists and the bucket has no `Validation`
+checks. With no profile, `Validation: none` means "not planned", not "nothing to validate":
+`Validated` stays `pending`.
 
 **Every check must be able to fail.** A check is a command or observation plus the
 result that counts as passing — an exit code, a test name that must pass, a value
@@ -197,11 +205,13 @@ self-report success.
 **`Validation`** checks come from the profile's validation kinds. Mark each `auto`
 (the skill runs it), `manual` (a human must — calling a number, approving a billable
 deploy), or `wait` (needs real traffic or a deploy to land). A bucket with nothing
-user-visible or deployable has no `Validation` and is `Validated: n/a`.
+user-visible or deployable has no `Validation` and is `Validated: n/a` (profile present only; see step 1b for the no-profile case).
 
 **`Judgment`** holds what no command can decide — "reviewer judges the benchmark
 delta", "second-engineer review", open design questions. Keeping them here keeps
-`Acceptance` falsifiable instead of diluting it.
+`Acceptance` falsifiable instead of diluting it. It is not part of the worker's task
+spec: step 6 surfaces every non-`none` item to the user, who owns the decision at PR
+review.
 
 **`Mutation-check: yes`** makes the worker break the code each new test covers,
 watch the test fail, then restore it. It costs worker time, so set it where a test
@@ -222,6 +232,9 @@ any run can resume.
 Report: bucket count, the wave structure (what runs in parallel, what waits), total
 story points, and the manifest path. Call out **non-autonomous buckets separately**
 with their reason — those need the user in the loop and will not be dispatched.
+
+List every bucket's `Judgment` items that are not `none` — nothing automated reads
+them, so the user must agree to own them now.
 
 List any ticket AC with no covering check, and every `manual` or `wait` validation
 check — those are the user's time later, so they should agree to them now.

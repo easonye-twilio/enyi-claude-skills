@@ -34,7 +34,8 @@ Route by what the diff touched; a diff that touches both gets both:
   `apps/storybook/.storybook/main.ts`: `libs/{console-ds,ds-react,ds-icons,ui-primitives,
   ui-icons,forms-core,common-frontend-ui,common-frontend-utils,identity-components,
   talia-shared,account-upgrade,workbench}/src` and `console-app-modules/**/src/**/*.stories.*`.
-  Re-read that file rather than trusting this list. Port 9001. Components render in
+  Re-read that file rather than trusting this list. Port 6006 when started with `nx run storybook:storybook` (no `-p`; the app's own `dev`
+  script uses 6008), so read the real port from the server output. Components render in
   isolation and need no login.
 - **app** — `console-app-modules/**`, `apps/console-core`, and any other lib or app the
   running console renders without stories (for example `libs/common-frontend`). Port
@@ -42,8 +43,11 @@ Route by what the diff touched; a diff that touches both gets both:
 - Neither (types, config, GraphQL schema, build tooling) → no browser; the bucket is
   `Validated: n/a`. A UI diff must never land here just because its path is not named above.
 
-Browser tooling, dev-server reuse, and the two-step Twilio login: read
-`~/.claude/references/one-console-browser.md`. Do not improvise a login flow or
+Browser tooling, dev-server reuse, and the two-step Twilio login are documented in
+`~/.claude/references/one-console-browser.md`. That file is the user's own and is not
+shipped with this plugin: read it if it exists. If it does not, `storybook` checks need
+no login, so run them; `app` checks need an authenticated session, so mark them
+`unverified` ("no login procedure available") rather than improvising a flow. Never
 hardcode credentials into commands.
 
 Walk paths with `/screenshot-changes`; it derives affected UI paths from the diff.
@@ -61,7 +65,7 @@ token usage, and states deliberately and report mismatches as findings.
   `configuration/consoleAppModulePorts.ts` (3002-3052), and `scripts/start.sh` starts only
   the base modules plus the ones you name. For app checks, run the same `lsof` working
   directory check on the changed module's port, and make sure that module is started.
-- `lsof -i :5173` / `lsof -i :9001` — a server already listening may have been started from
+- `lsof -i :5173` / `lsof -i :6006` — a server already listening may have been started from
   another checkout or commit. Reuse it only after confirming its working directory is
   inside the bucket's worktree (`lsof -a -p <pid> -d cwd`; Nx often runs from `apps/...`);
   otherwise stop it if you started it, or ask.
