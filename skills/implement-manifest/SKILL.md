@@ -22,6 +22,10 @@ is silently skipped. The turn ends with a per-bucket table and the review result
 Safe failure: preserve the worktree and report the bucket as `failed` or `unknown`.
 Never delete a worktree to clear an error.
 
+`<plugin-root>` below means the directory two levels above this skill's base directory
+(it holds `scripts/`, `profiles/` and `references/`). Always substitute it as an absolute
+path: a worker's cwd is its worktree, so a relative path would not resolve there.
+
 ## 1. Load the manifest
 
 Take a path, or a slug resolved against `~/.claude/manifests/<repo-name>/`. If
@@ -49,14 +53,14 @@ both be gone; the branch and PR are what survive. For each one:
 2. `git worktree list` — reuse the worktree holding `<branch>` if there is one. Never
    create a second worktree for a branch.
 3. Only if `Run:` is set and Orca is ready, `worker-list --run <runId>` for the
-   `Dispatch:` id. A live worker → rejoin the wait loop. An exited one → re-dispatch
-   to the existing worktree (step 9).
+   `Dispatch:` id (commands are in `../../references/orca-backend.md`). A live worker →
+   rejoin the wait loop. An exited one → re-dispatch to the existing worktree (step 9).
 
 **Write state as it happens, not at the end.** Re-read the manifest and edit only the
 field you are changing — never rewrite the whole file; `/validate-manifest` may be
 editing it from another session.
 Use `<plugin-root>/scripts/manifest.py set <manifest> <bucket> <field> <value>` for
-each change and `manifest.py status <manifest>` to read state back; it rewrites one
+each change and `<plugin-root>/scripts/manifest.py status <manifest>` to read state back; it rewrites one
 field and leaves every other line alone.
 
 **`Autonomous: no` buckets are never dispatched.** They carry an interactive gate
@@ -101,9 +105,7 @@ and follow it. It covers worktree creation with git, `Agent` dispatch with
 
 ## 6. The task spec
 
-`<plugin-root>` is two directories above this skill's base directory. Substitute it as an
-absolute path before dispatch: a worker's cwd is its worktree, so a relative path would
-not resolve there.
+Substitute `<plugin-root>` (defined at the top) as an absolute path in the spec below.
 
 Every worker gets the same five fields, verbatim from the manifest, plus the
 protocol block. This is the whole contract; it is why worker output never needs to
@@ -146,29 +148,30 @@ Do not start dev servers, Storybook, or anything else that binds a port —
 other workers are running in parallel and will collide. Visual verification
 is the coordinator's job, not yours.
 
-<The profile's `## Suppressions` worker rule, verbatim.>
-
-Before opening the PR, verify you introduced no new suppressions:
-
-  <plugin-root>/scripts/check-suppressions.sh <plugin-root>/profiles/<name>.md origin/<pr-base>
-
-Any hit is a blocking failure. Report `failed` with the rule you could not satisfy
-and why. A bucket that lands with a suppression is worth less than one that stops
-and asks.
+<The profile's `## Suppressions` worker rule, verbatim. If the profile has no such
+section, omit this rule and step 2 below, and tell the user the check is not configured.>
 
 Branch is already checked out and based on <pr-base>. When acceptance passes:
   1. Commit following this repo's conventional-commit style; reference the
      ticket key(s) <keys> in the subject or footer.
-  2. Push the branch.
-  3. Open a DRAFT PR with `gh pr create --draft --base <pr-base>`, using the
+  2. Verify you introduced no new suppressions. The check reads committed changes,
+     so it runs after the commit:
+       <plugin-root>/scripts/check-suppressions.sh <plugin-root>/profiles/<name>.md origin/<pr-base>
+     Exit 1 means a hit on an added line: a blocking failure. Remove it and amend, or
+     report `failed` with the rule you could not satisfy and why. A bucket that lands
+     with a suppression is worth less than one that stops and asks. Exit 2 is a setup
+     error: report it in STATUS rather than skipping the check. Re-run it after any
+     fix in step 5.
+  3. Push the branch.
+  4. Open a DRAFT PR with `gh pr create --draft --base <pr-base>`, using the
      repo's .github/PULL_REQUEST_TEMPLATE.md. Title references <keys>. The
      description opens with a <=3-sentence paragraph covering what this does
      and why, before any bullets.
-  4. Run `/deepreview-branch` against <pr-base> from inside this worktree. Fix
+  5. Run `/deepreview-branch` against <pr-base> from inside this worktree. Fix
      every blocking correctness finding yourself and re-run the Tier 1
      acceptance checks above before moving on. Leave non-blocking nits
      unfixed — list them in your report instead of fixing them unasked.
-  5. Report back.
+  6. Report back.
 
 You may use the in-process Agent tool for your own sub-tasks. You may NOT start
 Orca workers — nesting depth is capped and it will fail.
@@ -256,10 +259,12 @@ bucket's profile:
 <plugin-root>/scripts/check-suppressions.sh <plugin-root>/profiles/<name>.md origin/<pr-base> <branch>
 ```
 
-A non-zero exit means the
-bucket added a suppression. Treat it as blocking regardless of what the worker
+Exit 1 means the
+bucket added a suppression: treat it as blocking regardless of what the worker
 reported, and surface the underlying limitation to the user — a rule the code could
-not satisfy without suppression is worth knowing about, not just a bad diff.
+not satisfy without suppression is worth knowing about, not just a bad diff. Exit 2 is a
+setup problem (profile missing or without `## Suppressions`, base ref not fetched), not
+a finding: fix the setup or tell the user the check could not run; do not re-dispatch.
 
 Triage what the worker reported:
 - Non-blocking nits it listed → present them to the user; do not fix unasked.

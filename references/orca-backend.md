@@ -9,7 +9,10 @@ orca orchestration run-create --objective "<manifest slug>" --json \
   | jq -r '.result.run.id'
 ```
 
-Write the id to the manifest's `Run:` header immediately.
+Write the id to the manifest's `Run:` header immediately:
+`<plugin-root>/scripts/manifest.py set <manifest> manifest Run <id>`
+(`manifest` as the bucket name addresses header fields; `<plugin-root>` is defined in
+`implement-manifest/SKILL.md`).
 
 **Always `jq`-filter orca output.** Raw receipts carry capability lists, prompt
 metadata, and effect blocks you do not need; unfiltered they are the single largest
@@ -99,7 +102,7 @@ orca orchestration worker-list --run <runId> --include-remote --json \
 
 Act on `projection.nextAction` when it carries argv. Only positive proof of exit
 (`exited` liveness, or a transcript whose last turn sent no `worker_done`)
-authorizes stop or abandon — load `references/recovery-and-cleanup.md` at that
-point via `orca skills get orchestration --reference ...`, not before.
+authorizes stop or abandon — load the orchestration skill's `references/recovery-and-cleanup.md` (not a file in
+this plugin) at that point via `orca skills get orchestration --reference ...`, not before.
 
 When a wave settles, unblock dependents and dispatch the next wave.

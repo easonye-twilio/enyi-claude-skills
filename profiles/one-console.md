@@ -9,13 +9,13 @@ on one daemon produces flaky, confusing failures.
 
 - typecheck, lint (the design-system rules live here), and unit tests for affected projects
 - `/design-analysis` where it applies — programmatic PASS/FAIL, not visual
-- `scripts/check-suppressions.sh` against the PR base (see Suppressions)
+- the suppression check (run as in `implement-manifest` step 6; see Suppressions)
 
 E2E is not run locally. CI runs it per PR.
 
 ## Suppressions
 
-Globs: `*.ts` `*.tsx` `*.js` `*.jsx`
+Globs: `*.ts` `*.tsx` `*.js` `*.jsx` `*.mjs` `*.mts` `*.cts`
 Patterns: `eslint-disable` `ts-expect-error` `@ts-ignore`
 
 Worker rule (copy into the task spec):

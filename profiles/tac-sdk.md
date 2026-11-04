@@ -31,12 +31,12 @@ hermetic checks, not evidence of live behavior.
 
 ## Suppressions
 
-Globs: `*.py` `*.ts` `*.tsx` `*.js`
-Patterns: `# noqa` `# type: ignore` `eslint-disable` `@ts-ignore`
+Globs: `*.py` `*.ts` `*.tsx` `*.js` `*.jsx` `*.mjs` `*.mts` `*.cts`
+Patterns: `# noqa` `# type: ignore` `eslint-disable` `@ts-ignore` `ts-expect-error`
 
 Worker rule (copy into the task spec):
 
-Do not add `# noqa`, `# type: ignore`, `eslint-disable`, or `@ts-ignore` to make a
+Do not add `# noqa`, `# type: ignore`, `eslint-disable`, `@ts-ignore`, or `ts-expect-error` to make a
 linter or type-checker pass. If a rule cannot be satisfied, report it as a finding and
 `ask` the coordinator rather than suppressing it.
 
