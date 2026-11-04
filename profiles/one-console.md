@@ -57,6 +57,10 @@ token usage, and states deliberately and report mismatches as findings.
 
 ## Preflight
 
+- Each console-app module runs its own dev server on a port from
+  `configuration/consoleAppModulePorts.ts` (3002-3052), and `scripts/start.sh` starts only
+  the base modules plus the ones you name. For app checks, run the same `lsof` working
+  directory check on the changed module's port, and make sure that module is started.
 - `lsof -i :5173` / `lsof -i :9001` — a server already listening may have been started from
   another checkout or commit. Reuse it only after confirming its working directory is
   inside the bucket's worktree (`lsof -a -p <pid> -d cwd`; Nx often runs from `apps/...`);
@@ -73,12 +77,10 @@ token usage, and states deliberately and report mismatches as findings.
   … | jq …` is fine; adding `| base64 -d > file` puts the command back in the sandbox,
   where it fails with `stale_bootstrap`. First look at the shape without the payload:
   `orca screenshot --json | jq -c '.result | del(.data)'`. If it carries a file `path`,
-  `cp` that file into the evidence directory in a second command. If the image only
-  comes back inline in `result.data` (older CLIs; there is no `--out` flag), saving it
-  means pushing megabytes of base64 through the Write tool and risks a truncated PNG:
-  do that only for the shots that matter, then `base64 -d` it in a separate command and
-  confirm with `file <png>` that it reports PNG image data (size alone does not catch a
-  corrupt file). Otherwise record what you saw in `Evidence` and say no image was saved.
+  `cp` that file into the evidence directory in a second command, and confirm with
+  `file <png>` that it reports PNG image data. If no `path` comes back (an older CLI
+  returning inline base64), do not route megabytes of base64 through the Write tool:
+  record what you saw in `Evidence`, say no image was saved, and suggest upgrading Orca.
 - No visual-regression tooling exists, so every browser `pass` is an agent's judgment,
   not a test. Say so in the report.
 

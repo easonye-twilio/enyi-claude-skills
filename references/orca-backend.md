@@ -47,8 +47,8 @@ Progress (step 2), then create the worktree and dispatch:
 # Worktree. --base-branch is the PR base from the manifest: main, or the parent
 # bucket's branch when stacking.
 orca worktree create --repo id:<repoId> --name <bucket-branch-name> \
-  --base-branch <pr-base> --no-parent --json \
-  | jq -r '.result.worktree.id'
+  --branch <manifest branch> --base-branch <pr-base> --no-parent --json \
+  | jq -c '{id:.result.worktree.id, branch:.result.worktree.branch}'
 
 # Dispatch. Note: --setup is REJECTED on an existing worktree selector, so it is
 # only ever passed at create time.
@@ -61,7 +61,10 @@ orca orchestration worker-start --run <runId> \
             agent:.result.launch.effective.agent, model:.result.launch.effective.model}'
 ```
 
-Compare `launch.effective` against what you requested. If they differ, say so —
+Without `--branch`, Orca prefixes the git branch name and resume (which finds work by the
+manifest's branch) would not find it. Check that the returned `branch` is the manifest's
+(`refs/heads/<branch>`); a taken name gets a numeric suffix, so a mismatch is a stop
+condition, not something to record. Compare `launch.effective` against what you requested. If they differ, say so —
 never report a model from the requested arguments alone.
 
 Right after each dispatch, write the bucket's `Status: dispatched`, `Worktree:`, and
@@ -85,11 +88,11 @@ this wait.
 
 Process **every** message in the batch before acking:
 - `question` → `orca orchestration reply --id <msgId> --body "<answer>" --json`
-- `escalation` → decide, then reply or mark the bucket failed
+- `escalation` → decide, then reply, or mark the bucket `failed` and `worker-release` it
 - `worker_done` → validate the payload's `taskId`/`dispatchId` against the bucket you
   expect, then verify the report (step 8). Everything after that depends on the verdict:
   - **Accepted** → write `Status: done`, `PR`, and `Notes` (nits left unfixed) to the
-    manifest (and `Validated: pending` if this was a validation fix), transition its ticket(s) to In Review (step 2), and only then
+    manifest, reset `Redispatches` to 0 (and, for a validation fix, set `Validated: pending`), transition its ticket(s) to In Review (step 2), and only then
     `orca orchestration worker-release --dispatch <id> --json`.
   - **Rejected, attempts left** → re-dispatch (step 9) into the same terminal. Do not
     move the ticket and do not release: release removes the terminal step 9 reuses.

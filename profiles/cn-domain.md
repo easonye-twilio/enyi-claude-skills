@@ -12,9 +12,14 @@ building block is its own module: a service (`services/<svc>` or nested, such as
 `services/recall/<svc>`) or a library under `libs/`. For each changed file, find its
 nearest `go.mod` and run from that directory:
 - `go vet ./...` and `golangci-lint run`
-- `make fmtchk` only if that module's own `Makefile` defines it; otherwise `gofmt -l .`
-- `CN_INCLUDE_ONLY_MAKEFILE_PATHS="<module dir relative to the repo root>" make test`
-  from the repo root. Unscoped `make test` runs every building block, so always scope it.
+- `make fmtchk` only if that module's own `Makefile` defines it; otherwise `test -z "$(gofmt -l .)"` (`gofmt -l` exits 0 even when it lists files; empty
+  output is the pass condition)
+- `CN_INCLUDE_ONLY_MAKEFILE_PATHS="<dir relative to the repo root>" make test` from the
+  repo root, where `<dir>` is the nearest ancestor of the change that has a `Makefile`
+  (some modules, such as `libs/clients/go/clients/*`, have none). With no Makefile, run
+  `go test ./...` in the `go.mod` directory. Unscoped `make test` runs every building
+  block, so always scope it, and treat "no building blocks matched" as a setup error,
+  not a pass.
 - `make terraform-fmt` when `.tf` files changed
 - Specs: `make lint` and `make breaking` in `specs/` when protos changed
 
@@ -49,6 +54,19 @@ than suppressing it.
 | observe | Grafana MCP (metrics), ClickHouse `otel_twlo.otel_logs` (logs) | Grafana MCP, ClickHouse | CloudWatch / ClickHouse logs for the service |
 
 Prefer the Grafana MCP over WebFetch for dashboards and queries.
+
+**Local stacks are machine-global, not per worktree.** memora's compose project is
+named `memora` with fixed container names, so `make up` from a bucket worktree replaces
+a stack started from another checkout, and `make down` removes it. maestro's `make local`
+stops any running local environment first. Before either, look for a running stack
+(`docker ps --filter label=com.docker.compose.project=memora`; for maestro, its running
+services) and read its working directory (`docker inspect` label
+`com.docker.compose.project.working_dir`). Reuse it only if that directory is inside the
+bucket's worktree; otherwise ask the user before replacing it.
+
+`get-*` and `list-*` against `prod` return real customer data. Prefer `dev` or `stage`;
+if `prod` is needed, ask first, use `list-stores`/`get-store` or counts, and never paste
+response bodies into `Evidence`.
 
 **Never send a mutating request to `prod`.** In memora, only `get-*` and `list-*` scripts
 may run against `prod`; `create-*`, `patch-*`, `delete-*`, `import-profiles.sh`,
@@ -97,5 +115,6 @@ running version observed. A screenshot is optional, never required.
 
 ## Teardown
 
-`make down` for a local stack you started. Deployed dev changes stay; record what was
+Tear down a local stack only if this session started it: memora `make down`, maestro
+`make stop` (maestro has no `down` target). Deployed dev changes stay; record what was
 deployed.

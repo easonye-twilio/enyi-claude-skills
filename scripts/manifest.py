@@ -26,12 +26,13 @@ FIELD_RE = re.compile(r"^- ([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z -]*?):[ \t]*(.*?)\s*$")
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
-MUTABLE = ("Status", "Validated", "Validated-at", "Redispatches", "Evidence", "PR", "Notes", "Worktree", "Dispatch", "Run")
+MUTABLE = ("Status", "Validated", "Validated-at", "Redispatches", "Fixes", "Evidence", "PR", "Notes", "Worktree", "Dispatch", "Run")
 ALLOWED = {
     "Status": {"pending", "dispatched", "done", "failed", "unknown"},
     "Validated": {"pending", "pass", "fail", "waiting", "unverified", "n/a"},
 }
-STATUS_COLUMNS = ("Status", "Validated", "PR", "Worktree", "Dispatch")
+STATUS_COLUMNS = ("Status", "Validated", "Validated-at", "Redispatches", "Fixes", "PR", "Worktree", "Dispatch")
+INTEGER_FIELDS = ("Redispatches", "Fixes")
 
 
 def die(message, code=1):
@@ -184,6 +185,8 @@ def cmd_set(path, bucket, name, value):
         die(f"field must be one of {', '.join(MUTABLE)}", 2)
     if "\n" in value or "\r" in value:
         die("value must be a single line", 2)
+    if canonical in INTEGER_FIELDS and not first_word(value).isdigit():
+        die(f"{canonical} must be a non-negative integer", 2)
     allowed = ALLOWED.get(canonical)
     if allowed and first_word(value).lower() not in allowed:
         die(f"{canonical} must start with one of: {', '.join(sorted(allowed))}", 2)

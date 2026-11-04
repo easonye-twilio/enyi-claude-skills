@@ -41,8 +41,10 @@ unimplemented, `dispatched`, `failed`, or waiting on the user (`Autonomous: no`)
 they were skipped. Of the `done` buckets, select the ones with `Validated: pending`,
 `waiting`, or `unverified`, plus any `pass` whose branch moved since: compare the
 bucket's `Validated-at` SHA with `git rev-parse origin/<branch>` (after a
-`git fetch`, run with `dangerouslyDisableSandbox`; if the fetch fails, treat every `pass`
-as possibly moved and select it). A `pass`
+`git fetch`, run with `dangerouslyDisableSandbox`). If the fetch fails, stop and say so:
+do not re-run passes (that can mean billable deploys or manual phone tests) because of a
+network error. A branch missing from `origin` (a merged PR whose branch was deleted)
+keeps its verdict. A `pass`
 with no `Validated-at` is selected too, since nothing says what it covered. Skip `n/a`,
 and skip a current `pass` unless the user asks for a re-run. If nothing is selected, say
 so and stop.
@@ -81,13 +83,18 @@ another checkout or commit, and validating against it gives a false pass. Find i
 working directory (`lsof -a -p <pid> -d cwd`) and resolve its real path: servers
 spawned by Nx or pnpm often sit in a subdirectory such as `apps/storybook`, so accept it
 when that path is inside the bucket's worktree. If it is elsewhere, or you cannot tell, stop it (only if you started it) or ask the
-user, rather than reusing it. Never parallelize this skill: concurrent logins invalidate each other, two deploys to
+user, rather than reusing it. Check out the tested commit at `origin/<branch>` (or confirm `git rev-parse HEAD` equals
+it with a clean tree) and record that SHA as `Validated-at`; never stamp a SHA the checks
+did not run on. Never parallelize this skill: concurrent logins invalidate each other, two deploys to
 one environment race, and a shared Twilio number can only point at one webhook. The
 resulting failures look like implementation bugs.
 
 **Validate the stack tip.** Dependent buckets are stacked, so the tip of a stack
 already contains every change beneath it — check it out and run all of their checks
-in one pass. Independent buckets each need their own checkout, run serially. State the
+in one pass. Independent buckets each need their own checkout, run serially. Before taking it, require `git merge-base --is-ancestor origin/<parent> origin/<tip>`
+for every bucket below the tip: a tip that predates a parent's fix does not contain what
+that parent's `Validated-at` would claim. If not, validate that bucket on its own, or
+record it `unverified` ("needs rebase onto <parent>"). State the
 tradeoff when you take it: a stack-tip pass proves the combination works, not that
 each PR stands alone. Call that out for any bucket merging on its own schedule.
 
@@ -125,7 +132,7 @@ file, since another session may have changed it. Use
 
 ```
 - Validated: pass | fail | waiting | unverified
-- Validated-at: <full SHA of that bucket's own origin/<branch>; in a stack-tip pass, each bucket's own SHA, not the tip's>
+- Validated-at: <full SHA of the commit the checks actually ran on; in a stack-tip pass, each bucket's own origin/<branch> SHA, not the tip's>
 - Evidence: V1 pass — <what was observed, path>; V2 fail — <what broke>; V3 unverified — <what could not be reached and why>; ...
 ```
 
@@ -140,7 +147,9 @@ waiting and on what, and the exact command to resume.
 For a `fail`, route the fix back to the bucket's branch rather than patching it here —
 this session's job is the verdict, not the repair. Also set `Status: failed` on the bucket
 that owns the failing check (in a stack-tip pass, the lowest bucket whose change causes
-it, not the whole stack): that is the re-entry signal. `/implement-manifest` re-dispatches a `failed`
+it, not the whole stack): that is the re-entry signal. In a stack-tip pass give `fail`
+only to that owner; buckets above it get `Validated: unverified` ("blocked by <owner>"),
+so `/implement-manifest` does not send them fix dispatches for a parent's failure. `/implement-manifest` re-dispatches a `failed`
 bucket whose `Validated` is `fail` to its existing worktree, using `Evidence` as the
 change, and on success returns it to `Status: done`, `Validated: pending` — which this
 skill then selects again.
