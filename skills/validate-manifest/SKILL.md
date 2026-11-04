@@ -49,12 +49,22 @@ with no `Validated-at` is selected too, since nothing says what it covered. Skip
 and skip a current `pass` unless the user asks for a re-run. If nothing is selected, say
 so and stop.
 
-**Profile.** Use the manifest's `Profile:` header. If absent (older manifests, or no
-manifest), pick the profile whose `Repos:` line lists this repo's name. Profiles live
-at `../../profiles/<name>.md` relative to this skill's base directory. Read only the
-one you need.
+**`gh` and every git command that talks to the remote (`fetch`, `push`, `ls-remote`) fail
+inside the sandbox** (TLS certificate error): run them with `dangerouslyDisableSandbox`. A
+failed call tells you nothing about the remote.
 
-No matching profile → do not guess how to boot an unfamiliar system. Mark every
+**Profile.** Use the manifest's `Profile:` header. If absent (older manifests, or no
+manifest), match on the git remote's repo name, not the folder name (checkouts and
+worktrees are named freely):
+`basename -s .git "$(git remote get-url origin)"`. Split each profile's `Repos:` line on
+commas, trim whitespace, and compare whole entries for equality — never substrings
+(`twilio-agent-connect-python` is a prefix of `twilio-agent-connect-python-em`). Exactly
+one match → that profile. No match, several, or no `origin` remote → ask the user which
+profile applies; do not pick.
+Profiles live at `../../profiles/<name>.md` relative to this skill's base directory. Read
+only the one you need.
+
+The user names none → do not guess how to boot an unfamiliar system. Mark every
 selected bucket `unverified` ("no validation profile for <repo>"), and offer to draft
 one with the user.
 
@@ -115,13 +125,31 @@ A bucket is `pass` only when every check passed; any `fail` makes it `fail`; oth
 an outstanding `wait` makes it `waiting`, and anything that could not run makes it
 `unverified`.
 
-Evidence goes in `~/.claude/manifests/<repo-name>/<slug>/evidence/<bucket-key>/` under
-a manifest — never in the working tree. With no manifest, write it to the session
-scratchpad.
+Evidence goes in `~/.claude/manifests/<repo-name>/<slug>/evidence/<bucket-id>/` under
+a manifest — never in the working tree. `<bucket-id>` is the id in the bucket's heading
+(`## Bucket A — …` → `A`; for a stack-tip pass, each bucket's evidence goes under its own
+id). With no manifest, write it to the session scratchpad.
+
+The Bash sandbox cannot write under `~/.claude/manifests` (`manifest.py set` included:
+run it with `dangerouslyDisableSandbox` when it reports `Operation not permitted`).
+Create text evidence files with the Write tool (file tools are not bound by it), pasting
+the relevant, trimmed output. Binary evidence (screenshots) and bulky captures are saved in
+the scratchpad, which is session-scoped, so copy them into the evidence directory with a
+sandbox-disabled `cp` the user approves; until then a scratchpad path in `Evidence` is
+temporary and the report says so.
 
 **Teardown is part of the outcome.** Whatever the profile says to tear down, tear down
 before recording the verdict. A resource left behind is a `fail` even if every check
 passed.
+
+The one exception, which overrides the profile's Teardown section, is a resource a `wait`
+check still needs: tearing it down would destroy the thing being waited on. Do not tear it
+down, and do not count it as a leftover `fail`. List what stays up (stack, environment,
+webhook or number) in `Evidence` and in the report, and say that anything else needing
+the same stack name, number or webhook is blocked until the wait settles. A later run reads
+that list from `Evidence` before overwriting it, treats those resources as its own, and
+tears them down once no `wait` needs them. A resource nothing is waiting on is torn down
+as usual.
 
 ## 5. Record verdicts
 
@@ -142,7 +170,9 @@ whole field. What broke, what could not be reached, and every wait condition go 
 `Evidence`, which this skill owns and overwrites on a re-run.
 
 Then overwrite the manifest's `## Handoff` section: what was validated, what is
-waiting and on what, and the exact command to resume.
+waiting and on what, what is still deployed, and the exact command to resume. An older
+manifest may have none: add one at the end of the file (`Updated`, `State`, `Next` lines,
+as `/tickets-to-manifest` writes it) rather than skipping the step.
 
 For a `fail`, route the fix back to the bucket's branch rather than patching it here —
 this session's job is the verdict, not the repair. Also set `Status: failed` on the bucket

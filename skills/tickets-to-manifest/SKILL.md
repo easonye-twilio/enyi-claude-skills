@@ -43,9 +43,16 @@ exclude it before you bucket.
 ## 1b. Pick the validation profile
 
 Profiles live at `../../profiles/<name>.md` relative to this skill's base directory.
-Use the one whose `Repos:` line lists this repo's name, and read it now: its hermetic
+Use the one whose `Repos:` line has an entry exactly equal to the git remote's repo name
+(`basename -s .git "$(git remote get-url origin)"`; never a substring match, and not the
+folder name). Trim whitespace around entries. Ask on no match, several, or no `origin`
+remote. Read it now: its hermetic
 checks are what `Acceptance` is written from, and its validation kinds are what
-`Validation` is written from. Record it in the manifest's `Profile:` header.
+`Validation` is written from. Record it in the manifest's `Profile:` header. Rules the
+profile's hermetic section states for every command (e.g. a required env prefix, "read the
+repo's CLAUDE.md first") go verbatim into each bucket's `Constraints`, and into the
+`Acceptance` commands where they apply: workers get the manifest text verbatim and
+`/implement-manifest` adds nothing at dispatch.
 
 No matching profile → say so, and offer to draft one with the user before bucketing.
 Without one, `Acceptance` falls back to the repo's CI commands, `Validation` is
