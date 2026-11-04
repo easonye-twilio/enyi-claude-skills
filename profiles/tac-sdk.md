@@ -51,7 +51,8 @@ No repo has a live integration or E2E test. Real-resource validation is mostly m
   rewires the Twilio number):
   - aws: `make deploy` (CDK) in `deploy/agentcore_aws_lambda`; outputs list webhook URLs
   - microsoft: `make deploy`, then `make configure-twilio` (the only repo that wires
-    Twilio automatically)
+    Twilio automatically). The deploy targets live in
+    `deploy/agent_framework_hosted_agents`, not at the repo root
   - google: `make deploy-all` in `deploy/agent_platform/adk`
 - **agent-probe** (`auto` once deployed) — google only:
   `deploy/agent_platform/adk/agent/invoke_adk.py` queries the deployed agent directly,
@@ -93,8 +94,13 @@ timestamps, and the user's report for `manual` checks.
 
 Part of the outcome — a resource left deployed is a `fail`, even if every check passed.
 
-- aws: `make destroy`
-- microsoft: `make down`
+- aws: `make destroy` in `deploy/agentcore_aws_lambda` (there is no root target)
+- microsoft: `make down` in `deploy/agent_framework_hosted_agents`. It asks for
+  confirmation; with no input it prints "Aborted." and **exits 0 while every resource
+  stays up**. Have the user run it, or run it where they can answer the prompt, and
+  confirm afterwards that the resources are gone (`azd show`, or list the resource
+  group). Never pipe `yes` into it or add `--force --purge`: that destroys and purges
+  without asking. An exit code of 0 is not evidence of teardown here.
 - google: no documented teardown; delete the Cloud Run service, the secret, and the
   reasoning engine by hand, and list them in the evidence
 - Restore the Twilio number and Conversation Configuration webhooks to what they were

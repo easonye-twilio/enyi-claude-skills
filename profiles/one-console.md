@@ -28,12 +28,19 @@ not something to code around. Stop and `ask` the coordinator.
 
 ## Validation kinds (shared resource, serial)
 
-Route by what the diff touched:
+Route by what the diff touched; a diff that touches both gets both:
 
-- **storybook** — `libs/console-ds`, `libs/ds-react`. Port 9001. Components render in
-  isolation and need no login. Only worth starting when the design system changed.
-- **app** — `console-app-modules/**`. Port 5173, logged in.
-- Neither → no browser; the bucket is `Validated: n/a`.
+- **storybook** — any lib or module that has stories. The truth is the `stories` globs in
+  `apps/storybook/.storybook/main.ts`: `libs/{console-ds,ds-react,ds-icons,ui-primitives,
+  ui-icons,forms-core,common-frontend-ui,common-frontend-utils,identity-components,
+  talia-shared,account-upgrade,workbench}/src` and `console-app-modules/**/src/**/*.stories.*`.
+  Re-read that file rather than trusting this list. Port 9001. Components render in
+  isolation and need no login.
+- **app** — `console-app-modules/**`, `apps/console-core`, and any other lib or app the
+  running console renders without stories (for example `libs/common-frontend`). Port
+  5173, logged in.
+- Neither (types, config, GraphQL schema, build tooling) → no browser; the bucket is
+  `Validated: n/a`. A UI diff must never land here just because its path is not named above.
 
 Browser tooling, dev-server reuse, and the two-step Twilio login: read
 `~/.claude/references/one-console-browser.md`. Do not improvise a login flow or
@@ -50,7 +57,9 @@ token usage, and states deliberately and report mismatches as findings.
 
 ## Preflight
 
-- `lsof -i :5173` / `lsof -i :9001` — reuse a running server rather than starting a second
+- `lsof -i :5173` / `lsof -i :9001` — a server already listening may have been started from
+  another checkout or commit. Reuse it only after confirming its working directory is the
+  bucket's worktree (`lsof -a -p <pid> -d cwd`); otherwise stop it if you started it, or ask.
 - `test -f libs/common-e2e/.env.dev` / `.env.stage` for the environment you will hit.
   Check presence only; never print contents.
 
@@ -59,10 +68,14 @@ token usage, and states deliberately and report mismatches as findings.
 - **One authenticated session and one tab at a time.** Concurrent logins as the same
   user invalidate each other and look like app bugs. Close every tab you opened for a
   bucket before moving to the next; close the last one before reporting.
-- `orca screenshot --json` returns the PNG inline as base64 in `result.data`; there is
-  no `--out` flag. Decode it yourself
-  (`... | jq -r '.result.data' | base64 -d > <path>.png`) and don't assume the file
-  exists because the command exited 0.
+- **Screenshots: keep `orca` bare, decode separately.** `orca screenshot … | jq …` is
+  fine; adding `| base64 -d > file` puts the command back in the sandbox, where it fails
+  with `stale_bootstrap`. Run `orca screenshot --json | jq -c '.result'` on its own and
+  read the shape it returns. If it carries a file `path`, `cp` that file into the
+  evidence directory in a second command. If it carries inline base64 in `result.data`
+  (older CLIs; there is no `--out` flag), write that text to a file with the Write tool
+  and run `base64 -d` on it in a separate command. Either way check the file exists and
+  is non-empty; do not assume it because the command exited 0.
 - No visual-regression tooling exists, so every browser `pass` is an agent's judgment,
   not a test. Say so in the report.
 
