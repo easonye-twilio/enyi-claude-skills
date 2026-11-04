@@ -43,18 +43,42 @@ after the value (`Status: done (2026-10-08, …)`, `Autonomous: no. <reason>`); 
 first word is the value. Ignore sections the skill doesn't own (status logs, rollout
 steps); never rewrite them.
 
-**Resume `dispatched` buckets before dispatching anything.** A `dispatched` bucket was
-in flight when a previous coordinator stopped. The worktree path and the Orca run may
-both be gone; the branch and PR are what survive. For each one:
+**`gh` and `git push` fail inside the sandbox** (TLS certificate error), so run them with
+`dangerouslyDisableSandbox`. A failed `gh` call tells you nothing about the PR: only a
+call that succeeded and returned no rows means "no PR".
 
-1. `gh pr list --head <branch> --json url,isDraft` — a PR exists → read it and decide
-   whether the work finished (check the PR description and commits against the
-   acceptance checks). If finished, record it as `done` and move on.
-2. `git worktree list` — reuse the worktree holding `<branch>` if there is one. Never
-   create a second worktree for a branch.
-3. Only if `Run:` is set and Orca is ready, `worker-list --run <runId>` for the
-   `Dispatch:` id (commands are in `../../references/orca-backend.md`). A live worker →
-   rejoin the wait loop. An exited one → re-dispatch to the existing worktree (step 9).
+**`Worktree:` holds an Orca worktree id (`<repoId>::<path>`) on the Orca backend and an
+absolute path on the fallback backend.** Either way, find a bucket's worktree by its
+branch with `git worktree list`, and never create a second worktree for a branch.
+
+**Resume `dispatched` buckets before dispatching anything.** A `dispatched` bucket was
+in flight when a previous coordinator stopped. The worktree and the Orca run may both be
+gone; the branch and PR are what survive. A worker opens its PR *before* it runs
+`/deepreview-branch`, so a PR proves the work started, not that it finished. For each
+bucket, in this order:
+
+1. **Is a worker still running?** (Commands are in `../../references/orca-backend.md`.)
+   - `Run:` set and Orca ready → reuse that Run, never create a new one (it would orphan
+     live workers). `worker-list --run <runId>` for the `Dispatch:` id. A live worker →
+     rejoin the wait loop and stop here for this bucket. If the Run no longer exists, say
+     so and ask before creating a new one.
+   - `Run:` set but Orca not ready → liveness is unknown. Leave the bucket `dispatched`,
+     tell the user to start Orca, and do not look at the PR or re-dispatch.
+   - No `Run:` (fallback backend) → in-process agents do not survive a coordinator
+     restart; treat the worker as not running.
+2. **Not running → look for the PR:**
+   `gh pr list --head <branch> --state all --json url,isDraft,state` (`--state all`: a
+   merged or closed PR must show up too).
+   - The call failed → unknown. Leave the bucket `dispatched` and say why.
+   - A `MERGED` PR → record `done` with the PR URL and note that it merged outside this run.
+     A `CLOSED` one → record `failed` ("PR closed unmerged") and tell the user.
+   - An open PR whose description carries a `CHECKS:` record covering every acceptance ID
+     → run the step 8 verification on it; record `done` only if it passes.
+   - An open PR without such a record, or no PR at all → the worker did not finish. Reuse
+     the worktree holding `<branch>` and re-dispatch there (step 9); do not start over.
+3. A `failed` bucket is never retried silently. If `Validated: fail`, it is a validation
+   fix: re-dispatch it (step 9) with the failure from `Evidence` as the change. Otherwise
+   list it and ask the user whether to retry.
 
 **Write state as it happens, not at the end.** Re-read the manifest and edit only the
 field you are changing — never rewrite the whole file; `/validate-manifest` may be
@@ -75,7 +99,8 @@ Transition each bucket's ticket(s) via the `jira-inator:jira-ticket-updater`
 skill, silently — no confirmation needed:
 
 - **In Progress** right before that bucket is dispatched.
-- **In Review** once its worker reports done and the PR URL is known.
+- **In Review** once its worker's report has passed verification (step 8) and the PR URL
+  is known — not when the worker merely reports done.
 
 ## 3. Pick the execution backend
 
@@ -100,8 +125,8 @@ dispatch, the wait loop, and stall recovery. Keep every `orca` command bare:
 ## 5. Fallback backend (no Orca)
 
 Read `../../references/fallback-backend.md` (relative to this skill's base directory)
-and follow it. It covers worktree creation with git, `Agent` dispatch with
-`isolation: "worktree"`, and result collection.
+and follow it. It covers worktree creation with git from the PR base, `Agent` dispatch
+into that worktree, and result collection.
 
 ## 6. The task spec
 
@@ -241,6 +266,17 @@ evidence. A missing ID, a `fail`, or evidence that is only an assertion ("tests
 pass") means the bucket is not done — re-dispatch (step 9). Do not re-run the checks
 yourself; that is the work the evidence exists to save.
 
+**Re-dispatch only when it can change the outcome.** Each bucket gets at most **2**
+re-dispatches; count them in `Notes` (`redispatch 1/2`). Past the cap, or when the same
+check fails the same way twice, record `failed` with the reason and stop — do not loop.
+Some report shapes can never pass, and re-dispatching them just burns the cap:
+- An older manifest with unstructured `Acceptance` (step 1) has no check IDs: accept a
+  single `CHECKS` entry with concrete evidence.
+- A check the worker's sandbox cannot run (it needs a port, a login, or a deploy) is a
+  planning mistake: record `failed`, and tell the user the check belongs in `Validation`.
+- Judge a check by the result its text names, not by the exit code alone: "no matches
+  expected" passes on a clean diff even though `grep` exits 1.
+
 A few claims are cheap to check and costly to get wrong, so check them directly:
 
 ```bash
@@ -282,21 +318,30 @@ change agreed in a parent-session discussion with the user, or a cross-bucket
 dependency that surfaced late. Never edit the worktree yourself from the
 coordinator — route the change to the owning bucket's worker instead.
 
-- **Orca backend**: reuse the proven terminal — `orchestration worker-start
-  --task <newTaskId> --terminal <agentTerminalHandle>`. Recover the handle with
-  `worker-show --dispatch <id> --json`.
-- **Fallback backend**: send a follow-up prompt to the still-running `Agent`
-  fork for that bucket, or start a new `Agent` with `isolation: "worktree"`
-  pointed at the existing worktree path if the original fork already exited.
+State the change plainly — what changed and why — and append the step 6 protocol block
+(the worker's protocol block already tells it not to improvise past what it's given). The
+new worker gets a fresh `STATUS`/`PR`/`CHECKS`/`NITS` report, verified by step 8 again.
+When that verification passes for a validation fix, set `Status: done` and
+`Validated: pending`: the code changed, so the old verdict no longer stands.
 
-State the change plainly — what changed and why. The worker's protocol block
-already tells it not to improvise past what it's given.
+- **Orca backend**: `orca orchestration worker-start` creates the task from `--spec`, so
+  no task id is needed. A worker is released only after its report passes
+  (`../../references/orca-backend.md`), so its terminal normally still exists: recover the
+  handle with `worker-show --dispatch <id> --json` and pass
+  `--terminal <handle> --worktree <worktreeId>`. If the terminal is gone (an exited
+  worker, or a resumed run), pass `--worktree <worktreeId> --agent claude --model <m>
+  --effort <e>` instead and a fresh terminal starts in the same worktree. Write the new
+  `Dispatch:` id to the manifest.
+- **Fallback backend**: start a new `Agent` the same way as the first dispatch
+  (`../../references/fallback-backend.md`), pointed at the existing worktree path. A
+  finished `Agent` cannot be sent a follow-up, so every re-dispatch is a new `Agent`.
 
 ## 10. Settle and report
 
 Per settled worker, do exactly one thing before acking: reuse the terminal, retain
 it (`worker-retain`), or release it (`worker-release`). Release is post-settlement
-cleanup — an accepted `worker_done` authorizes it, nothing else does.
+cleanup — a `worker_done` whose report **passed step 8 verification** authorizes it,
+nothing else does. A rejected report keeps its terminal, because step 9 reuses it.
 
 Do not end the turn while this returns rows:
 
