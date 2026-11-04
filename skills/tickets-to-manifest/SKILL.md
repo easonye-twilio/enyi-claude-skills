@@ -184,7 +184,9 @@ Run: —
 
 Field values are passed to workers verbatim, so never put `#` comments inside them.
 `Guidance` is `none` when no repo skill applies. `Mutation-check` is `yes` or `no`.
-`Validated` is `pending`, or `n/a` when the bucket has no `Validation` checks.
+`Validated` is `pending`, or `n/a` when a profile exists and the bucket has no `Validation`
+checks. With no profile, `Validation: none` means "not planned", not "nothing to validate":
+`Validated` stays `pending`.
 
 **Every check must be able to fail.** A check is a command or observation plus the
 result that counts as passing — an exit code, a test name that must pass, a value
@@ -203,7 +205,7 @@ self-report success.
 **`Validation`** checks come from the profile's validation kinds. Mark each `auto`
 (the skill runs it), `manual` (a human must — calling a number, approving a billable
 deploy), or `wait` (needs real traffic or a deploy to land). A bucket with nothing
-user-visible or deployable has no `Validation` and is `Validated: n/a`.
+user-visible or deployable has no `Validation` and is `Validated: n/a` (profile present only; see step 1b for the no-profile case).
 
 **`Judgment`** holds what no command can decide — "reviewer judges the benchmark
 delta", "second-engineer review", open design questions. Keeping them here keeps

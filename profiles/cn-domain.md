@@ -50,10 +50,10 @@ than suppressing it.
 
 | Kind | memora-domain | maestro-domain | agent-connect-domain |
 |---|---|---|---|
-| local-stack | `make up` (compose + LocalStack) | `make local` (stops any running local environment first) | not yet available |
+| local-stack | `make up` (compose + LocalStack) | `make local` (stops any running local environment first: check for one and ask before restarting) | not yet available |
 | api | `scripts/api-tests/*.sh <local\|dev\|stage\|prod>` — `prod` only for `get-*` and `list-*` | `ijhttp -e local -v requests/http-client.env.json requests/<file>.http` — never `prod`. `local` only: `authToken` exists only for `local` and there is no private env file, so `dev`/`stage` calls cannot authenticate; mark those `unverified` | not yet available |
 | component | Temporal `MemoraDomainTestSuite` via `services/common/test-worker` | `services/test-worker` | not yet available |
-| dev-deploy | `dev-deploy` PR label → Buildkite → Harness; track with the repo's `dev-deploy` skill. **`manual`**: the label changes the shared dev environment, and `make dev-deploy` is a break-glass path | CI-only. **`manual`**: `make git-create-and-push-dev-branch` force-pushes the dev branch; never run it locally | none — no dev-only path; `main` deploys to every environment |
+| dev-deploy | `dev-deploy` PR label → Buildkite → Harness; track with the repo's `dev-deploy` skill. **`manual`**: the label changes the shared dev environment, so the user applies it (the coordinator only after explicit confirmation); `make dev-deploy` is a break-glass path | none (CI-only): `make git-create-and-push-dev-branch` force-pushes the dev branch; never run it locally | none — no dev-only path; `main` deploys to every environment |
 | deploy-status | Harness MCP, `beacon deploys <svc> --env <env> --since 1d` | Harness MCP | Harness MCP; ECS service status |
 | observe | Grafana MCP (metrics), ClickHouse `otel_twlo.otel_logs` (logs) | Grafana MCP, ClickHouse | CloudWatch / ClickHouse logs for the service |
 

@@ -170,7 +170,7 @@ confirm `git diff` shows no leftover mutation. A test that never fails proves
 nothing. Report the mutation evidence under the check it supports.
 </IF>
 
-<IF the bucket has Guidance:>
+<IF the bucket has Guidance, i.e. it is set and not `none`:>
 This repo owns how this work is built. Follow <Guidance> and do not improvise
 an approach it covers.
 
@@ -273,7 +273,8 @@ implementation run whose context is already spent on dispatch and review.
 Do not start a dev server, log in, deploy, or drive a browser from this skill.
 
 Every bucket with `Validation` checks stays `Validated: pending`; a bucket without
-any is `Validated: n/a`.
+any is `Validated: n/a`, unless the manifest has no profile: then it stays `pending`
+and `/validate-manifest` records it as `unverified`.
 
 ## 8. Review
 

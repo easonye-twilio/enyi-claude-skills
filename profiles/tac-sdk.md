@@ -27,9 +27,9 @@ google supports Python 3.10–3.11 only.
 also linted and type-checked in CI.
 
 **python-em, aws-twilio-agent-connect-python, twilio-agent-connect-aws-deploy,
-aws-twilio-agent-connect-deploy**: no check commands are recorded here. The worker reads
-the repo's CLAUDE.md and CI workflow (`.github/workflows/`) and runs those commands; the
-profile's author should add them once a bucket has run in each.
+aws-twilio-agent-connect-deploy**: no check commands are recorded here. When writing
+`Acceptance` for these repos, derive it at planning time from the repo's CLAUDE.md and CI
+workflow (`.github/workflows/`), so each check is a concrete command.
 
 The repos' `test_integration.py` / `integration.test.ts` are **mocked**. They are
 hermetic checks, not evidence of live behavior.
@@ -55,11 +55,13 @@ No repo has a live integration or E2E test. Real-resource validation is mostly m
   point the Twilio number and Conversation Configuration webhooks at it, then call or
   text the number. Proof: the agent responds, and the logs show the expected path.
 - **deploy** (`manual` unless the user says otherwise; creates billable resources and
-  rewires the Twilio number):
+  rewires the Twilio number). Before any deploy, for every cloud, record the current
+  webhook values (redact query strings and userinfo) in the bucket's `Notes`, so teardown
+  can restore them:
   - aws: `make deploy` (CDK) in `deploy/agentcore_aws_lambda`; outputs list webhook URLs
   - microsoft: `make deploy`, then `make configure-twilio` (the only repo that wires
     Twilio automatically). The deploy targets live in
-    `deploy/agent_framework_hosted_agents`, not at the repo root. Record the old webhook values first, as for `example`
+    `deploy/agent_framework_hosted_agents`, not at the repo root
   - google: `make deploy-all` in `deploy/agent_platform/adk`
 - **agent-probe** (`auto` once deployed) — google only:
   `deploy/agent_platform/adk/agent/invoke_adk.py` queries the deployed agent directly,
@@ -78,7 +80,7 @@ Presence by name only; never print values.
 - Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY`,
   `TWILIO_API_SECRET`, `TWILIO_PHONE_NUMBER`, `TWILIO_CONVERSATION_CONFIGURATION_ID`
 - `command -v ngrok` for `example`
-- Cloud auth: `aws sts get-caller-identity --profile <AWS_PROFILE>` (aws; take the profile name from `deploy/agentcore_aws_lambda/.env` by reading only that key, never the other values; omit `--profile` if unset), `az account show` (microsoft), `gcloud auth list` (google)
+- Cloud auth: `[ -n "$AWS_PROFILE" ]`, then `aws sts get-caller-identity` (aws; uses the ambient profile. If `AWS_PROFILE` is unset, ask the user which profile; never read the `.env` file), `az account show` (microsoft), `gcloud auth list` (google)
 
 ## Gotchas
 
@@ -117,7 +119,8 @@ Part of the outcome — a resource left deployed is a `fail`, even if every chec
 - google: no documented teardown. During deploy, record the Cloud Run service name, the
   secret name, and the reasoning engine ID. At teardown, list those exact resources to
   the user and delete them only after they confirm; never delete anything not recorded
-  from this run. List them in the evidence
+  from this run. If no confirmation is possible, leave them, list them in the evidence,
+  and mark the bucket `fail` with "teardown pending"
 - Restore the Twilio number and Conversation Configuration webhooks to the values
   recorded before the first change, and record both the old and new values. If the old
   values were not recorded, say so and ask the user; do not guess.
