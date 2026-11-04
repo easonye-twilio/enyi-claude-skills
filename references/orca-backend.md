@@ -28,6 +28,11 @@ piping to any tool other than `jq` puts the command back in the sandbox. Expect
 don't redirect them away. If `orca status` returns `stale_bootstrap` while the
 app is open, suspect this before deciding Orca is down.
 
+`gh` and git remote commands are the opposite case from `orca`: `gh` and every git command
+that talks to the remote (`fetch`, `push`, `ls-remote`) fail inside the sandbox with a TLS
+error and need `dangerouslyDisableSandbox` (`implement-manifest` step 1). That includes
+the PR lookups and `git fetch` calls the coordinator runs in this flow.
+
 **Before the first dispatch, confirm the repo's own guardrails are live in a worker
 session.** A repo may enforce constraints with `PreToolUse` hooks from its project
 `.claude/settings.json` — those are the real defense against a worker coding around
@@ -41,7 +46,12 @@ that add custom styling to `console-app-modules/**/*.tsx`. It blocks only *added
 violations, so it will not fight unrelated work in legacy files.
 
 For each bucket whose dependencies are satisfied, transition its ticket(s) to In
-Progress (step 2), then create the worktree and dispatch:
+Progress (step 2), then **claim the bucket before creating anything**: write
+`Dispatch: pending` (this marker means "Orca backend, id not yet recorded"; it also
+replaces any id left from an earlier run), then `Status: dispatched`, with
+`manifest.py set`. A coordinator that dies after the claim is caught by the resume check
+(`implement-manifest` step 1) instead of dispatching the bucket twice. Then create the
+worktree and dispatch:
 
 ```bash
 # Worktree. --base-branch is the PR base from the manifest: main, or the parent
@@ -67,9 +77,9 @@ manifest's branch) would not find it. Check that the returned `branch` is the ma
 condition, not something to record. Compare `launch.effective` against what you requested. If they differ, say so —
 never report a model from the requested arguments alone.
 
-Right after each dispatch, write the bucket's `Status: dispatched`, `Worktree:`, and
-`Dispatch:` to the manifest. This is what lets a later run resume instead of
-dispatching the bucket twice.
+Write `Worktree:` as soon as the worktree exists (before `worker-start`) and `Dispatch:`
+as soon as the dispatch id is returned. If the coordinator dies between the two, resume
+finds the worker by its task title (`implement-manifest` step 1).
 
 Launch the entire ready wave before waiting. Then one rolling wait:
 
@@ -92,7 +102,7 @@ Process **every** message in the batch before acking:
 - `worker_done` → validate the payload's `taskId`/`dispatchId` against the bucket you
   expect, then verify the report (step 8). Everything after that depends on the verdict:
   - **Accepted** → write `Status: done`, `PR`, and `Notes` (nits left unfixed) to the
-    manifest, reset `Redispatches` to 0 (and, for a validation fix, set `Validated: pending`), transition its ticket(s) to In Review (step 2), and only then
+    manifest (for a validation fix, also set `Validated: pending`; never reset `Redispatches` or `Fixes`), transition its ticket(s) to In Review (step 2), and only then
     `orca orchestration worker-release --dispatch <id> --json`.
   - **Rejected, attempts left** → re-dispatch (step 9) into the same terminal. Do not
     move the ticket and do not release: release removes the terminal step 9 reuses.

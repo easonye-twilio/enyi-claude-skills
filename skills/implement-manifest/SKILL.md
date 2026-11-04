@@ -15,9 +15,26 @@ one draft PR.
 
 ## Outcome
 
-Every bucket in the manifest reaches a terminal state — `done` with a draft PR URL,
-or `failed` with the reason — and the manifest file is updated to match. No bucket
-is silently skipped. The turn ends with a per-bucket table and the review results.
+Every bucket in the manifest ends the run in one of these states, and the manifest file
+is updated to match. No bucket is silently skipped.
+
+- `done` with a draft PR URL.
+- `failed` with the reason.
+- **Blocked**: never dispatched, because it is `Autonomous: no` or because a bucket it
+  depends on (directly or through the stack) is not `done`. Its manifest `Status` stays
+  `pending`; the final report shows `blocked: <reason>` (`needs foreground run`, or
+  `blocked by <bucket>`). A blocked bucket is a result, not an omission.
+- **Unresolved**: left `dispatched` because liveness or the PR could not be checked
+  (Orca not ready, `gh` failed), reported with that reason. Never guess past it.
+
+The turn ends with a per-bucket table and the review results.
+
+`Status` takes exactly these values (the `ALLOWED` set in `scripts/manifest.py`):
+`pending`, `dispatched`, `done`, `failed`, `unknown`. A worker's `STATUS: succeeded` is
+not a bucket status: it becomes `done` only after step 8 verification passes, and
+`STATUS: failed` becomes `failed` once the re-dispatch cap is spent (step 8). `unknown`
+is only found in older manifests; this skill does not write it. Treat it like a `failed`
+bucket: list it and ask before retrying.
 
 Safe failure: preserve the worktree and report the bucket as `failed` or `unknown`.
 Never delete a worktree to clear an error.
@@ -36,7 +53,8 @@ Parse buckets, dependencies, branch bases, per-bucket models, ticket keys,
 (re-entry, below). If every bucket is `done` and none is in re-entry, say so and stop.
 
 **Older manifests** may lack `Profile:`, `Run:`, `Worktree:`, `Dispatch:`, or numbered
-checks. Infer the profile from the repo name, treat a missing `Run:` as "no reattach
+checks. Infer the profile from the git remote's repo name (the exact-match rule in
+`/validate-manifest` step 1; ask on none or several), treat a missing `Run:` as "no reattach
 information", and treat free-text `Acceptance` as one unstructured check — say so in
 the report rather than pretending it was itemized. Older fields often carry prose
 after the value (`Status: done (2026-10-08, …)`, `Autonomous: no. <reason>`); the
@@ -67,8 +85,16 @@ bucket, in this order:
      stop here for this bucket. If the Run no longer exists, say so and ask before
      creating a new one. With Orca not ready, liveness is unknown: leave the bucket
      `dispatched`, tell the user to start Orca, and do not look at the PR or re-dispatch.
-   - No `Dispatch:` → it was an in-process agent, which does not survive a coordinator
-     restart; treat the worker as not running.
+   - `Dispatch: pending` → the Orca backend claimed the bucket and the coordinator
+     stopped before recording the dispatch id, so a worker may be running unrecorded.
+     Handle it like the case above (Orca not ready → leave it `dispatched`), but find the
+     worker in the Run's `worker-list` by task title (`--task-title` is the bucket
+     title), counting only live workers (earlier attempts reuse the title). One live
+     match → write its `Dispatch:` and rejoin the wait loop. Several → stop and ask. None
+     → not running.
+   - `Dispatch: —`, or no `Dispatch:` field (older manifests) → it was an in-process
+     agent, which does not survive a coordinator restart; treat the worker as not running.
+     Whatever `Worktree:` holds, `Dispatch:` alone says which backend claimed the bucket.
 2. **Not running → look for the PR:**
    `gh pr list --head <branch> --state all --json url,isDraft,state` (`--state all`: a
    merged or closed PR must show up too).
@@ -78,11 +104,13 @@ bucket, in this order:
    - A `MERGED` PR → record `done` with the PR URL and note that it merged outside this run.
      A `CLOSED` one → record `failed` ("PR closed unmerged") and tell the user.
    - An open PR whose description carries a report block titled `Attempt <n>` with `n`
-     equal to the bucket's current `Redispatches` (use only that block: earlier attempts
-     are stale), `STATUS: succeeded`, and a `CHECKS:` record covering every acceptance ID
+     equal to the bucket's current `Redispatches` plus `Fixes` (use only that block:
+     earlier attempts are stale), `STATUS: succeeded`, and a `CHECKS:` record covering every acceptance ID
      → run the step 8 verification on it; record `done` only if it passes.
    - An open PR without such a record, or no PR at all → the worker did not finish. Reuse
      the worktree holding `<branch>` and re-dispatch there (step 9); do not start over.
+     If neither the branch nor a worktree exists (a crash between the claim and the first
+     push), this is a fresh first dispatch: follow the backend's normal path.
      A resume-driven re-dispatch (the worker died with no report) does not increment
      `Redispatches` or `Fixes`.
 
@@ -99,7 +127,8 @@ other `failed` bucket: list it and ask the user whether to retry.
 field you are changing — never rewrite the whole file; `/validate-manifest` may be
 editing it from another session.
 Use `<plugin-root>/scripts/manifest.py set <manifest> <bucket> <field> <value>` for
-each change and `<plugin-root>/scripts/manifest.py status <manifest>` to read state back; it rewrites one
+each change (the Bash sandbox cannot write under `~/.claude/manifests`: if it reports
+`Operation not permitted`, run it with `dangerouslyDisableSandbox`) and `<plugin-root>/scripts/manifest.py status <manifest>` to read state back; it rewrites one
 field and leaves every other line alone.
 
 **`Autonomous: no` buckets are never dispatched.** They carry an interactive gate
@@ -107,6 +136,11 @@ no worker and no coordinator can clear — typically a Design Systems review for
 new or extended console-ds pattern. List them for the user to run in the
 foreground, and treat their dependents as blocked until the user says otherwise.
 Say this up front, not after the fan-out.
+
+The same goes for `pending` dependents of a `failed` or `unknown` bucket: never dispatch
+them, and report them as blocked (see Outcome). They stay `pending`. A dependent already
+`dispatched` is left to finish; one already `done` keeps its state, and the report notes
+it sits on a failed parent.
 
 ## 2. Ticket status
 
@@ -148,15 +182,16 @@ into that worktree, and result collection.
 Substitute `<plugin-root>` (defined at the top) as an absolute path in the spec below.
 
 Every worker gets the same five fields, verbatim from the manifest, plus the
-protocol block. This is the whole contract; it is why worker output never needs to
-flood back into the parent.
+protocol block. The coordinator adds nothing of its own to the manifest's fields (profile
+rules were already applied when the manifest was planned; see Tier 1). This is the whole
+contract; it is why worker output never needs to flood back into the parent.
 
 ```
 Target:      <from manifest>
 Change:      <from manifest>
 Constraints: <from manifest>
 Ownership:   This worktree only. Do not edit files outside the listed targets.
-Attempt:     <the bucket's current Redispatches value, 0 on the first dispatch>
+Attempt:     <the bucket's Redispatches plus Fixes, 0 on the first dispatch>
 Acceptance:  <numbered checks from manifest>
 
 Each acceptance check is a command and the result that counts as passing. Run every
@@ -215,7 +250,7 @@ Branch is already checked out and based on <pr-base>. When acceptance passes:
      bucket and `/validate-manifest` both read it). Leave non-blocking nits unfixed —
      list them in your report instead of fixing them unasked.
   6. Append the report block below (STATUS/PR/CHECKS/NITS) to the PR description under
-     the heading `Attempt <Redispatches>` (<n> is given in your task), so a coordinator
+     the heading `Attempt <n>` (<n> is the Attempt value in your task), so a coordinator
      that lost your message can still verify the work. Then report back.
 
 `git fetch`, `git push` and `gh` fail inside the sandbox (TLS certificate error): run them
@@ -255,9 +290,14 @@ authenticated session runs here, serially, exactly once.
 
 Headless: no ports, no auth, no browser, no deploy. This is the bucket's numbered
 `Acceptance`, written at planning time from the profile's hermetic checks
-(`../../profiles/<name>.md` relative to this skill's base directory). Read the
-profile for repo-specific worker notes — e.g. disabling a shared build daemon —
-and fold them into the task spec's `Constraints`.
+(`../../profiles/<name>.md` relative to this skill's base directory). Repo-specific
+rules in that section — e.g. disabling a shared build daemon — are applied at planning:
+`/tickets-to-manifest` copies profile-wide rules into `Constraints` and bakes per-command
+ones into `Acceptance`. Older manifests predate that. Before the first dispatch, read the
+profile's hermetic section once; if a profile-wide rule is missing from a bucket's
+`Constraints` and `Acceptance`, ask the user whether to add it to the manifest. Never
+patch the spec silently, since workers get the manifest's text verbatim. The only profile
+text copied into the spec at dispatch is the `## Suppressions` worker rule.
 
 **E2E is not run locally.** CI runs it per PR. Running it again here is slow,
 needs the app and auth, and tells you nothing the pipeline will not.
@@ -344,11 +384,12 @@ change agreed in a parent-session discussion with the user, or a cross-bucket
 dependency that surfaced late. Never edit the worktree yourself from the
 coordinator — route the change to the owning bucket's worker instead.
 
-Before launching, claim the bucket: write `Status: dispatched` and increment
-`Redispatches` (a review or verification re-dispatch) or `Fixes` (a validation fix),
-never both (a crash after this point is then caught by the step 1 liveness check,
-instead of starting a second worker over the first). Write the new `Dispatch:` id as soon
-as it is known.
+Before launching, claim the bucket: increment `Redispatches` (a review or verification
+re-dispatch) or `Fixes` (a validation fix), never both, write `Dispatch: pending` (Orca)
+or `Dispatch: —` (fallback) so the old, settled id is not mistaken for the new worker,
+and then `Status: dispatched`. A crash after this point is caught by the step 1 liveness
+check instead of starting a second worker over the first. Write the new `Dispatch:` id as
+soon as it is known.
 
 State the change plainly — what changed and why — and append the step 6 protocol block
 (the worker's protocol block already tells it not to improvise past what it's given). The
@@ -400,15 +441,20 @@ Run it again with `--terminal-state retained`.
 Every bucket's `Status`, `PR`, and `Notes` should already be written (steps 4–5).
 Confirm none is still `dispatched` without a reason, then overwrite the manifest's
 `## Handoff` section: one or two lines of state and the exact next step. Overwrite,
-don't append — history lives in the bucket fields and PRs, not in a growing log.
+don't append — history lives in the bucket fields and PRs, not in a growing log. An
+older manifest may have no `## Handoff`: add one at the end of the file (`Updated`,
+`State`, `Next` lines, as `/tickets-to-manifest` writes it) rather than skipping the step.
 
 Final report — one table, no narration:
 
 | Bucket | Tickets | Status | PR | Review |
 |--------|---------|--------|----|--------|
 
+Status is the manifest value, or `blocked: <reason>` for a bucket never dispatched.
+
 Then state what needs the user: PRs to mark ready, blocking review findings, failed
-buckets, and every `Autonomous: no` bucket still waiting on them. Leave worktrees
+buckets, and every blocked bucket with what unblocks it (the `Autonomous: no` ones are
+waiting on the user). Leave worktrees
 in place unless the user asks to clean them up.
 
 Close by pointing at **`/validate-manifest <slug>`** for the buckets left
