@@ -35,9 +35,15 @@ Takes a manifest path or slug (`~/.claude/manifests/<repo-name>/`), or a branch 
 with no manifest. Being usable outside the manifest flow is the point; this is the
 skill you re-run after fixing review notes.
 
-From a manifest, select buckets with `Validated: pending` or `waiting`. Skip `n/a` and
-anything already `pass` unless the user asks for a re-run or the branch moved since.
-If nothing is selected, say so and stop.
+From a manifest, select a bucket only if its `Status` is `done` — a bucket that is
+unimplemented, `dispatched`, `failed`, or waiting on the user (`Autonomous: no`) carries
+`Validated: pending` from planning but has nothing to validate; list those and say why
+they were skipped. Of the `done` buckets, select the ones with `Validated: pending`,
+`waiting`, or `unverified`, plus any `pass` whose branch moved since: compare the
+bucket's `Validated-at` SHA with `git rev-parse origin/<branch>` (after a fetch). A `pass`
+with no `Validated-at` is selected too, since nothing says what it covered. Skip `n/a`,
+and skip a current `pass` unless the user asks for a re-run. If nothing is selected, say
+so and stop.
 
 **Profile.** Use the manifest's `Profile:` header. If absent (older manifests, or no
 manifest), pick the profile whose `Repos:` line lists this repo's name. Profiles live
@@ -67,8 +73,12 @@ this step exists to prevent.
 
 ## 3. One shared resource at a time
 
-Check what is already running and reuse it rather than starting a second instance.
-Never parallelize this skill: concurrent logins invalidate each other, two deploys to
+Check what is already running before starting a second instance, but reuse it only if
+it serves the code under test. A dev server or Storybook on a known port may belong to
+another checkout or commit, and validating against it gives a false pass. Find its
+working directory (`lsof -a -p <pid> -d cwd`) and compare it with the bucket's
+worktree; if it differs, or you cannot tell, stop it (only if you started it) or ask the
+user, rather than reusing it. Never parallelize this skill: concurrent logins invalidate each other, two deploys to
 one environment race, and a shared Twilio number can only point at one webhook. The
 resulting failures look like implementation bugs.
 
@@ -112,16 +122,24 @@ file, since another session may have changed it. Use
 
 ```
 - Validated: pass | fail | waiting | unverified
-- Evidence: V1 pass — <what was observed, path>; V2 waiting — <condition>; ...
-- Notes: <what broke, or what could not be reached and why>
+- Validated-at: <full SHA of origin/<branch> that was checked out for the checks>
+- Evidence: V1 pass — <what was observed, path>; V2 fail — <what broke>; V3 unverified — <what could not be reached and why>; ...
 ```
+
+**Never write `Notes`.** `/implement-manifest` keeps unfixed review nits and must-do
+follow-ups there (a pre-deploy blocker, a synthetic to update), and `set` replaces the
+whole field. What broke, what could not be reached, and every wait condition go in
+`Evidence`, which this skill owns and overwrites on a re-run.
 
 Then overwrite the manifest's `## Handoff` section: what was validated, what is
 waiting and on what, and the exact command to resume.
 
 For a `fail`, route the fix back to the bucket's branch rather than patching it here —
-this session's job is the verdict, not the repair. `/implement-manifest` owns
-re-dispatch.
+this session's job is the verdict, not the repair. Also set the bucket's `Status` to
+`failed`: that is the re-entry signal. `/implement-manifest` re-dispatches a `failed`
+bucket whose `Validated` is `fail` to its existing worktree, using `Evidence` as the
+change, and on success returns it to `Status: done`, `Validated: pending` — which this
+skill then selects again.
 
 ## 6. Report
 

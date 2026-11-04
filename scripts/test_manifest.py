@@ -165,6 +165,14 @@ class SetTest(ManifestTest):
         text = self.read()
         self.assertIn("- PR: —\n- Worktree: /tmp/wt\n\n```", text)
 
+    def test_hyphenated_validated_at_field_is_inserted_then_replaced(self):
+        self.set("B", "Validated-at", "abc123")
+        self.assertIn("- PR: —\n- Validated-at: abc123\n\n```", self.read())
+        self.set("B", "validated-at", "def456")
+        text = self.read()
+        self.assertIn("- Validated-at: def456\n", text)
+        self.assertNotIn("abc123", text)
+
     def test_inserts_into_last_bucket_without_trailing_newline(self):
         self.write("# M\n\n## Bucket A — x\n- Status: pending")
         code, _, _ = self.set("A", "PR", "https://example.com/1")
