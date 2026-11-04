@@ -165,6 +165,26 @@ class SetTest(ManifestTest):
         text = self.read()
         self.assertIn("- PR: —\n- Worktree: /tmp/wt\n\n```", text)
 
+    def test_hyphenated_validated_at_field_is_inserted_then_replaced(self):
+        self.set("B", "Validated-at", "abc123")
+        self.assertIn("- PR: —\n- Validated-at: abc123\n\n```", self.read())
+        self.set("B", "validated-at", "def456")
+        text = self.read()
+        self.assertIn("- Validated-at: def456\n", text)
+        self.assertNotIn("abc123", text)
+
+    def test_counters_show_in_status(self):
+        self.set("A", "Fixes", "1")
+        code, out, _ = run(manifest.cmd_status, self.path)
+        self.assertIn("fixes=1", out)
+
+    def test_redispatches_counter_is_its_own_field_and_survives_notes_writes(self):
+        self.set("B", "Redispatches", "1")
+        self.set("B", "Notes", "nits")
+        text = self.read()
+        self.assertIn("- Redispatches: 1\n", text)
+        self.assertIn("- Notes: nits\n", text)
+
     def test_inserts_into_last_bucket_without_trailing_newline(self):
         self.write("# M\n\n## Bucket A — x\n- Status: pending")
         code, _, _ = self.set("A", "PR", "https://example.com/1")
@@ -220,6 +240,10 @@ class SetValidationTest(ManifestTest):
 
     def test_rejects_unknown_field(self):
         self.assert_rejected("A", "Tickets", "T-9", "field must be one of")
+
+    def test_rejects_non_integer_counters(self):
+        self.assert_rejected("A", "Redispatches", "two", "non-negative integer")
+        self.assert_rejected("A", "Fixes", "-1", "non-negative integer")
 
     def test_rejects_bad_status_value(self):
         self.assert_rejected("A", "Status", "bogus", "Status must start with one of")
