@@ -30,13 +30,16 @@ not something to code around. Stop and `ask` the coordinator.
 
 Route by what the diff touched:
 
-- **storybook** — `libs/console-ds`, `libs/ds-react`. Port 9001. Components render in
+- **storybook** — `libs/console-ds`, `libs/ds-react`. Port 6006 (`nx run storybook:storybook` runs `storybook dev` with no `-p`). Components render in
   isolation and need no login. Only worth starting when the design system changed.
 - **app** — `console-app-modules/**`. Port 5173, logged in.
 - Neither → no browser; the bucket is `Validated: n/a`.
 
-Browser tooling, dev-server reuse, and the two-step Twilio login: read
-`~/.claude/references/one-console-browser.md`. Do not improvise a login flow or
+Browser tooling, dev-server reuse, and the two-step Twilio login are documented in
+`~/.claude/references/one-console-browser.md`. That file is the user's own and is not
+shipped with this plugin: read it if it exists. If it does not, `storybook` checks need
+no login, so run them; `app` checks need an authenticated session, so mark them
+`unverified` ("no login procedure available") rather than improvising a flow. Never
 hardcode credentials into commands.
 
 Walk paths with `/screenshot-changes`; it derives affected UI paths from the diff.
@@ -50,7 +53,7 @@ token usage, and states deliberately and report mismatches as findings.
 
 ## Preflight
 
-- `lsof -i :5173` / `lsof -i :9001` — reuse a running server rather than starting a second
+- `lsof -i :5173` / `lsof -i :6006` — reuse a running server rather than starting a second
 - `test -f libs/common-e2e/.env.dev` / `.env.stage` for the environment you will hit.
   Check presence only; never print contents.
 
