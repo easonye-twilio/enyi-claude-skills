@@ -10,6 +10,18 @@ Validation profiles live in `profiles/<name>.md`, one per repo family. A profile
 the repos it covers, their hermetic checks, validation kinds, preflight, gotchas, evidence,
 and teardown. Add one when starting work in a repo no profile covers.
 
+Two more directories ship with the skills:
+
+- `scripts/` — deterministic helpers the skills call instead of spelling the work out in prose:
+  `manifest.py` (`status`, and `set` to edit a single manifest field in place; stdlib Python 3)
+  and `check-suppressions.sh` (fails if a branch adds suppressions matching a profile's
+  `## Suppressions` globs and patterns).
+- `references/` — detail a skill loads only when it needs it: the Orca and fallback
+  execution backends, and one-console UI routing.
+
+Each profile's `## Suppressions` section lists `Globs:` and `Patterns:` (backtick-quoted
+tokens; patterns are extended regexes) and the worker rule copied into task specs.
+
 ## Install
 
 ```sh

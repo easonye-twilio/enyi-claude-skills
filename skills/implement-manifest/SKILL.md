@@ -22,6 +22,10 @@ is silently skipped. The turn ends with a per-bucket table and the review result
 Safe failure: preserve the worktree and report the bucket as `failed` or `unknown`.
 Never delete a worktree to clear an error.
 
+`<plugin-root>` below means the directory two levels above this skill's base directory
+(it holds `scripts/`, `profiles/` and `references/`). Always substitute it as an absolute
+path: a worker's cwd is its worktree, so a relative path would not resolve there.
+
 ## 1. Load the manifest
 
 Take a path, or a slug resolved against `~/.claude/manifests/<repo-name>/`. If
@@ -49,12 +53,15 @@ both be gone; the branch and PR are what survive. For each one:
 2. `git worktree list` — reuse the worktree holding `<branch>` if there is one. Never
    create a second worktree for a branch.
 3. Only if `Run:` is set and Orca is ready, `worker-list --run <runId>` for the
-   `Dispatch:` id. A live worker → rejoin the wait loop. An exited one → re-dispatch
-   to the existing worktree (step 9).
+   `Dispatch:` id (commands are in `../../references/orca-backend.md`). A live worker →
+   rejoin the wait loop. An exited one → re-dispatch to the existing worktree (step 9).
 
 **Write state as it happens, not at the end.** Re-read the manifest and edit only the
 field you are changing — never rewrite the whole file; `/validate-manifest` may be
 editing it from another session.
+Use `<plugin-root>/scripts/manifest.py set <manifest> <bucket> <field> <value>` for
+each change and `<plugin-root>/scripts/manifest.py status <manifest>` to read state back; it rewrites one
+field and leaves every other line alone.
 
 **`Autonomous: no` buckets are never dispatched.** They carry an interactive gate
 no worker and no coordinator can clear — typically a Design Systems review for a
@@ -85,132 +92,20 @@ acceptance. Only dispatch and result-collection differ.
 
 ## 4. Orca backend
 
-One Run for the whole manifest:
-
-```bash
-orca orchestration run-create --objective "<manifest slug>" --json \
-  | jq -r '.result.run.id'
-```
-
-Write the id to the manifest's `Run:` header immediately.
-
-**Always `jq`-filter orca output.** Raw receipts carry capability lists, prompt
-metadata, and effect blocks you do not need; unfiltered they are the single largest
-avoidable cost in this skill.
-
-**Keep every `orca` command bare: `orca … | jq …` and nothing else.** Under the
-Claude Code sandbox, the CLI can't see the Orca app's process, so it reports
-`stale_bootstrap` and refuses to connect. Listing `orca:*` and `jq:*` in
-`sandbox.excludedCommands` fixes this, but only when the whole command matches
-those patterns. Adding a redirect (`2>/dev/null`), chaining with `&&`/`;`, or
-piping to any tool other than `jq` puts the command back in the sandbox. Expect
-`check --wait` to print keepalive heartbeats on stderr; they are harmless, so
-don't redirect them away. If `orca status` returns `stale_bootstrap` while the
-app is open, suspect this before deciding Orca is down.
-
-**Before the first dispatch, confirm the repo's own guardrails are live in a worker
-session.** A repo may enforce constraints with `PreToolUse` hooks from its project
-`.claude/settings.json` — those are the real defense against a worker coding around
-a rule, and they are worth far more than any instruction in a task spec. A fresh
-worktree is a new project directory, so verify the hooks actually fire there rather
-than assuming they were inherited. If they are not active, say so before fanning
-out: without them you are relying on worker compliance alone.
-
-In `one-console` this is `PreToolUse → no-custom-styles.ts`, which refuses edits
-that add custom styling to `console-app-modules/**/*.tsx`. It blocks only *added*
-violations, so it will not fight unrelated work in legacy files.
-
-For each bucket whose dependencies are satisfied, transition its ticket(s) to In
-Progress (step 2), then create the worktree and dispatch:
-
-```bash
-# Worktree. --base-branch is the PR base from the manifest: main, or the parent
-# bucket's branch when stacking.
-orca worktree create --repo id:<repoId> --name <bucket-branch-name> \
-  --base-branch <pr-base> --no-parent --json \
-  | jq -r '.result.worktree.id'
-
-# Dispatch. Note: --setup is REJECTED on an existing worktree selector, so it is
-# only ever passed at create time.
-orca orchestration worker-start --run <runId> \
-  --spec "<task spec, step 6>" \
-  --task-title "<bucket title>" \
-  --worktree "<worktreeId>" \
-  --agent claude --model <bucket model> --effort <bucket effort> --json \
-  | jq -c '{task:.result.taskId, dispatch:.result.dispatchId, state:.result.state,
-            agent:.result.launch.effective.agent, model:.result.launch.effective.model}'
-```
-
-Compare `launch.effective` against what you requested. If they differ, say so —
-never report a model from the requested arguments alone.
-
-Right after each dispatch, write the bucket's `Status: dispatched`, `Worktree:`, and
-`Dispatch:` to the manifest. This is what lets a later run resume instead of
-dispatching the bucket twice.
-
-Launch the entire ready wave before waiting. Then one rolling wait:
-
-```bash
-orca orchestration check --wait --types "worker_done,escalation,question" \
-  --timeout-ms 900000 --json \
-  | jq -c '{delivery:.result.deliveryId, timedOut:.result.timedOut,
-            msgs:[.result.messages[]|{from:.from_handle, type:.type,
-                  subject:.subject, body:.body, payload:.payload}]}'
-```
-
-This loop is self-contained: a timeout or empty batch means keep calling `check
---wait` again, not end the turn. Do not wrap `/implement-manifest` in `/loop` —
-that would end the turn and re-enter the skill from step 1 instead of resuming
-this wait.
-
-Process **every** message in the batch before acking:
-- `question` → `orca orchestration reply --id <msgId> --body "<answer>" --json`
-- `escalation` → decide, then reply or mark the bucket failed
-- `worker_done` → validate the payload's `taskId`/`dispatchId` against the bucket
-  you expect, verify the report (step 8), write `Status`, `PR`, and `Notes` (failure
-  reason, nits left unfixed) to the manifest, transition its ticket(s) to In Review
-  (step 2), then `orca orchestration worker-release --dispatch <id> --json`
-
-Ack, then wait again. A timeout or empty batch is a **checkpoint, not a failure** —
-keep waiting. After three consecutive empty waits:
-
-```bash
-orca orchestration worker-list --run <runId> --include-remote --json \
-  | jq -c '.result.workers[]|{dispatch:.dispatchId, liveness:.projection.liveness,
-            next:.projection.nextAction}'
-```
-
-Act on `projection.nextAction` when it carries argv. Only positive proof of exit
-(`exited` liveness, or a transcript whose last turn sent no `worker_done`)
-authorizes stop or abandon — load `references/recovery-and-cleanup.md` at that
-point via `orca skills get orchestration --reference ...`, not before.
-
-When a wave settles, unblock dependents and dispatch the next wave.
+Read `../../references/orca-backend.md` (relative to this skill's base directory)
+and follow it. It covers run creation, guardrail checks, worktree and worker
+dispatch, the wait loop, and stall recovery. Keep every `orca` command bare:
+`orca … | jq …` and nothing else.
 
 ## 5. Fallback backend (no Orca)
 
-Same buckets, in-process. Transition ticket(s) to In Progress (step 2), then
-create worktrees with git, dispatch with `Agent` using `isolation: "worktree"`,
-and set `model` explicitly per bucket:
-
-```
-Agent(subagent_type: "general-purpose", model: "sonnet",
-      isolation: "worktree",
-      description: "<bucket title>",
-      prompt: "<same task spec as step 6>")
-```
-
-Before launching, write each bucket's `Status: dispatched` to the manifest; once an
-`Agent` returns, write the worktree path it reports to `Worktree:`. The branch name is
-what a later resume relies on, since `isolation: "worktree"` worktrees can be cleaned
-up automatically.
-
-Launch an entire wave in one message so buckets run concurrently. As each result
-arrives, verify it (step 8), write `Status`, `PR`, and `Notes`, and transition its
-tickets to In Review (step 2). Then proceed to the next wave. Everything else — task
-spec, PR handling, review — is unchanged.
+Read `../../references/fallback-backend.md` (relative to this skill's base directory)
+and follow it. It covers worktree creation with git, `Agent` dispatch with
+`isolation: "worktree"`, and result collection.
 
 ## 6. The task spec
+
+Substitute `<plugin-root>` (defined at the top) as an absolute path in the spec below.
 
 Every worker gets the same five fields, verbatim from the manifest, plus the
 protocol block. This is the whole contract; it is why worker output never needs to
@@ -253,35 +148,30 @@ Do not start dev servers, Storybook, or anything else that binds a port —
 other workers are running in parallel and will collide. Visual verification
 is the coordinator's job, not yours.
 
-HARD CONSTRAINT — suppressions are a failure, not a workaround:
-Do not add an eslint-disable, ts-expect-error, ts-ignore, or any other
-suppression to make a design-system rule pass. Do not add a `className` to
-escape a design-system limitation. If the design system cannot express what
-the design needs, that is a finding to report — NOT something to code around.
-Stop and `ask` the coordinator.
-
-Before opening the PR, verify you introduced no new suppressions:
-
-  git diff $(git merge-base origin/main HEAD)..HEAD -- '*.tsx' '*.jsx' '*.ts' \
-    | grep '^+' | grep -nE 'eslint-disable|ts-expect-error|@ts-ignore'
-
-Any hit on an ADDED line is a blocking failure. Report `failed` with the rule
-you could not satisfy and why. A bucket that lands with a suppression breaks
-the PR pipeline and is worth less than one that stops and asks.
+<The profile's `## Suppressions` worker rule, verbatim. If the profile has no such
+section, omit this rule and step 2 below, and tell the user the check is not configured.>
 
 Branch is already checked out and based on <pr-base>. When acceptance passes:
   1. Commit following this repo's conventional-commit style; reference the
      ticket key(s) <keys> in the subject or footer.
-  2. Push the branch.
-  3. Open a DRAFT PR with `gh pr create --draft --base <pr-base>`, using the
+  2. Verify you introduced no new suppressions. The check reads committed changes,
+     so it runs after the commit:
+       <plugin-root>/scripts/check-suppressions.sh <plugin-root>/profiles/<name>.md origin/<pr-base>
+     Exit 1 means a hit on an added line: a blocking failure. Remove it and amend, or
+     report `failed` with the rule you could not satisfy and why. A bucket that lands
+     with a suppression is worth less than one that stops and asks. Exit 2 is a setup
+     error: report it in STATUS rather than skipping the check. Re-run it after any
+     fix in step 5.
+  3. Push the branch.
+  4. Open a DRAFT PR with `gh pr create --draft --base <pr-base>`, using the
      repo's .github/PULL_REQUEST_TEMPLATE.md. Title references <keys>. The
      description opens with a <=3-sentence paragraph covering what this does
      and why, before any bullets.
-  4. Run `/deepreview-branch` against <pr-base> from inside this worktree. Fix
+  5. Run `/deepreview-branch` against <pr-base> from inside this worktree. Fix
      every blocking correctness finding yourself and re-run the Tier 1
      acceptance checks above before moving on. Leave non-blocking nits
      unfixed — list them in your report instead of fixing them unasked.
-  5. Report back.
+  6. Report back.
 
 You may use the in-process Agent tool for your own sub-tasks. You may NOT start
 Orca workers — nesting depth is capped and it will fail.
@@ -362,22 +252,24 @@ marked its PR ready or targeted `main` instead of its parent broke the spec — 
 PR state and record it in `Notes`.
 
 Independently re-check each PR for suppressions the worker may have added and not
-reported — do not take its word for it:
+reported — do not take its word for it. From any checkout of the repo, using the
+bucket's profile:
 
 ```bash
-git diff $(git merge-base origin/main <branch>)..<branch> \
-  | grep '^+' | grep -nE 'eslint-disable|ts-expect-error|@ts-ignore'
+<plugin-root>/scripts/check-suppressions.sh <plugin-root>/profiles/<name>.md origin/<pr-base> <branch>
 ```
 
-A hit means the bucket worked around a design-system rule instead of asking. Treat
-it as blocking regardless of what the worker reported, and surface the underlying
-limitation to the user — that is a design-system gap worth knowing about, not just
-a bad diff.
+Exit 1 means the
+bucket added a suppression: treat it as blocking regardless of what the worker
+reported, and surface the underlying limitation to the user — a rule the code could
+not satisfy without suppression is worth knowing about, not just a bad diff. Exit 2 is a
+setup problem (profile missing or without `## Suppressions`, base ref not fetched), not
+a finding: fix the setup or tell the user the check could not run; do not re-dispatch.
 
 Triage what the worker reported:
 - Non-blocking nits it listed → present them to the user; do not fix unasked.
 - A worker that reports it could not self-fix a blocking finding, or a suppression
-  hit from the grep above → re-dispatch to that bucket's worker (step 9).
+  hit from the suppression check above → re-dispatch to that bucket's worker (step 9).
 
 A review authorizes synthesis, not coordinator file edits. Route fixes back to the
 bucket's worker rather than editing the worktree yourself.

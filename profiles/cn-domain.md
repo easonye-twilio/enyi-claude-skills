@@ -23,6 +23,17 @@ CLAUDE.md first where one exists — it wins over this file.
 **agent-connect-domain** (Go):
 - `make test` (runs `go test ./...` inside the Dockerfile build stage)
 
+## Suppressions
+
+Globs: `*.go` `*.java`
+Patterns: `//nolint` `@SuppressWarnings` `// CHECKSTYLE:OFF`
+
+Worker rule (copy into the task spec):
+
+Do not add `//nolint`, `@SuppressWarnings`, or `// CHECKSTYLE:OFF` to make a linter pass.
+If a rule cannot be satisfied, report it as a finding and `ask` the coordinator rather
+than suppressing it.
+
 ## Validation kinds (shared resource, serial)
 
 | Kind | memora-domain | maestro-domain | agent-connect-domain |

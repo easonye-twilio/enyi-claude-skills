@@ -9,9 +9,22 @@ on one daemon produces flaky, confusing failures.
 
 - typecheck, lint (the design-system rules live here), and unit tests for affected projects
 - `/design-analysis` where it applies — programmatic PASS/FAIL, not visual
-- the added-suppression grep from `implement-manifest` step 6
+- the suppression check (run as in `implement-manifest` step 6; see Suppressions)
 
 E2E is not run locally. CI runs it per PR.
+
+## Suppressions
+
+Globs: `*.ts` `*.tsx` `*.js` `*.jsx` `*.mjs` `*.mts` `*.cts`
+Patterns: `eslint-disable` `ts-expect-error` `@ts-ignore`
+
+Worker rule (copy into the task spec):
+
+HARD CONSTRAINT — suppressions are a failure, not a workaround. Do not add an
+eslint-disable, ts-expect-error, ts-ignore, or any other suppression to make a
+design-system rule pass. Do not add a `className` to escape a design-system limitation.
+If the design system cannot express what the design needs, that is a finding to report,
+not something to code around. Stop and `ask` the coordinator.
 
 ## Validation kinds (shared resource, serial)
 
