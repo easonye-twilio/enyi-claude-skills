@@ -38,9 +38,10 @@ ready bucket:
    `git worktree add --no-track -b <branch> <path> origin/<branch>`. If both exist, use the
    one that is ahead. If neither the branch nor a worktree exists (a crash before the first
    push), this is a fresh first dispatch.
-2. **Claim the bucket** before launching: `Status: dispatched`, `Worktree: <absolute
-   path>` and `Dispatch: —` (clear any id left from an earlier Orca run, or resume would
-   treat the bucket as an Orca worker). Use `manifest.py set`, see step 1.
+2. **Claim the bucket** before launching. Write `Worktree: <absolute path>` and
+   `Dispatch: —` first (this clears any id or `pending` left from an earlier Orca run, or
+   resume would treat the bucket as an Orca worker), and `Status: dispatched` last, so a
+   crash mid-claim leaves the bucket `pending`. Use `manifest.py set`, see step 1.
 3. **Dispatch with `Agent`, no `isolation`,** and set `model` explicitly per bucket. Start
    the prompt with the worktree contract, then the step 6 task spec:
 
