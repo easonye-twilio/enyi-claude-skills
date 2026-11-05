@@ -20,11 +20,11 @@ Load only what the task needs:
 | Product behavior / scope questions | PRD, plus the Blueprint |
 | SDK feature | The relevant SDK repo, ESOD 07 for the API contract, and its sibling SDKs for parity |
 
-Never read a whole snapshot. `rg` for the relevant headings first. The Blueprint is about 3,000 lines.
+Never read a whole snapshot. `rg` for the relevant headings first. The Blueprint is a live doc (the "Control-Data APIs tab (final)" artifact), not a snapshot: read only the tab or section the task needs. The Claude Docs `export` (format `markdown`) is too large for context and returns base64 inside JSON, and the tool saves the oversized result to a file. Decode it with `jq -r '.[1].text' <saved file> | jq -r '.data.bytes_b64' | base64 -d > $TMPDIR/blueprint.md`, then `rg -n '^#{1,3} '` for headings and read only the sections you need. The doc is about 1,000 lines. Its tab id is `66375c76-ef01` and its doc id is in `INDEX.md`.
 
 ## How to use the sources
 
-1. **Architecture first.** Before proposing a design, read the parts of the TAC design doc (ESOD 07) that apply to the task. If the task touches requirements or scope, also read the PRD and Blueprint snapshots in `~/.claude/references/tac/snapshots/`. Read only the relevant sections, not whole documents.
+1. **Architecture first.** Before proposing a design, read the parts of the TAC design doc (ESOD 07) that apply to the task. If the task touches requirements or scope, also read the PRD snapshot in `~/.claude/references/tac/snapshots/` and the Blueprint (fetched live, see Staleness). Read only the relevant sections, not whole documents.
 2. **Patterns from sibling domains.** For infrastructure and code patterns such as DynamoDB tables, IaC, service layout, config and CI:
    - Look at how `maestro-domain` and `memora-domain` do it, using `rg` and `fd` on the paths in the index.
    - Treat a pattern used in both as a team convention. If they differ, point out the difference and ask the user.
@@ -37,4 +37,4 @@ Never read a whole snapshot. `rg` for the relevant headings first. The Blueprint
 - If a snapshot is missing, or the user says the docs changed, suggest running `/tac-sync`.
 - Snapshots record their sync date in a header. Mention it if a snapshot is more than 2 weeks old.
 - Before relying on a repo's patterns, consider a `git -C <path> pull --ff-only`. Ask first if the repo has local changes.
-- URL sources that have no snapshot are fetched live: GitHub through `gh`, artifacts with the Artifact read action, Google Docs with Drive read_file_content.
+- URL sources that have no snapshot are fetched live: GitHub through `gh`, artifacts with the Artifact read action (artifacts built from the Claude Docs type, like the Blueprint, hold their content in the Claude Docs service: read them with the Claude Docs `read`/`export` tools instead), Google Docs with Drive read_file_content.
