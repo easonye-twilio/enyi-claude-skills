@@ -15,7 +15,7 @@ Load only what the task needs:
 
 | Task shape | Sources |
 |---|---|
-| Infra / IaC / tables / CI | agent-connect-domain, maestro-domain, memora-domain, plus ESOD 07 for data-model constraints and IPD for platform setup (search it with `search-internal-product-docs`) |
+| Infra / IaC / tables / CI | cloud-native-monorepo-foundation (platform standards, required) and cloud-native-monorepo-platform (required Terraform modules), then agent-connect-domain, maestro-domain, memora-domain, plus ESOD 07 for data-model constraints and IPD for platform setup (search it with `search-internal-product-docs`) |
 | API / domain logic | ESOD 07, plus the Blueprint for phasing and open decisions |
 | Product behavior / scope questions | PRD, plus the Blueprint |
 | SDK feature | The relevant SDK repo, ESOD 07 for the API contract, and its sibling SDKs for parity |
@@ -29,7 +29,7 @@ Never read a whole snapshot. `rg` for the relevant headings first. The Blueprint
    - Look at how `maestro-domain` and `memora-domain` do it, using `rg` and `fd` on the paths in the index.
    - Treat a pattern used in both as a team convention. If they differ, point out the difference and ask the user.
    - Follow the conventions agent-connect-domain already has before copying from a sibling.
-3. **Reconcile.** If a sibling's pattern conflicts with TAC architecture or requirements, TAC wins. Call out the conflict explicitly.
+3. **Reconcile.** If a sibling's pattern conflicts with TAC architecture or requirements, TAC wins. Call out the conflict explicitly. Platform standards are the exception: `cloud-native-monorepo-foundation` and the Terraform modules in `cloud-native-monorepo-platform` are mandatory for CND, so they win over both siblings and local preference. If TAC needs something they don't allow, flag it to the user rather than deviating.
 4. **Cite.** When a decision rests on one of these sources, name it, e.g. "per ESOD 07 §Data model" or "matches maestro-domain/infra/…".
 
 ## Staleness
