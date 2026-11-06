@@ -15,7 +15,7 @@ Load only what the task needs:
 
 | Task shape | Sources |
 |---|---|
-| Infra / IaC / tables / CI | cloud-native-monorepo-foundation (platform standards, required) and cloud-native-monorepo-platform (required Terraform modules), then agent-connect-domain, maestro-domain, memora-domain, plus ESOD 07 for data-model constraints and IPD for platform setup (search it with `search-internal-product-docs`) |
+| Infra / IaC / tables / CI | cloud-native-monorepo-foundation (platform standards, required) and cloud-native-monorepo-platform (required Terraform modules), then agent-connect-domain, maestro-domain, memora-domain, plus ESOD 07 for data-model constraints and the Backstage platform docs listed in INDEX (read them with `backstage-tools:search-docs`) |
 | API / domain logic | ESOD 07, plus the Blueprint for phasing and open decisions |
 | Product behavior / scope questions | PRD, plus the Blueprint |
 | SDK feature | The relevant SDK repo, ESOD 07 for the API contract, and its sibling SDKs for parity |
