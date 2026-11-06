@@ -11,8 +11,6 @@ Also included:
 
 - `standup` — daily standup digest from Jira, GitHub, Slack, git and calendar, written to the Obsidian daily note
 - `screenshot-changes` — capture UI screenshots that demonstrate the current branch's changes
-- `tac-context` — load Twilio Agent Connect architecture context before TAC work
-- `tac-sync` — refresh the local TAC doc snapshots and repos (data lives in `~/.claude/references/tac/`, not in this repo)
 
 Validation profiles live in `profiles/<name>.md`, one per repo family. A profile lists
 the repos it covers, their hermetic checks, validation kinds, preflight, gotchas, evidence,
